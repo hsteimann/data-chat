@@ -209,7 +209,6 @@ with col_client:
         options=list(client_options.keys()),
         format_func=lambda k: client_options[k],
         key="chat_client",
-        label_visibility="collapsed",
     )
 
 default_start = date.today() - timedelta(days=30)
