@@ -3,6 +3,7 @@
 import json
 import re
 import sys
+import uuid
 from datetime import date, timedelta
 
 import pandas as pd
@@ -32,30 +33,55 @@ MAX_CACHED_RESULTS = 20  # Max DataFrames kept in session cache
 
 
 # ---------------------------------------------------------------------------
-# DataFrame result cache — avoids storing DataFrames in chat messages
+# Chat session management
+# ---------------------------------------------------------------------------
+
+def _get_chat_sessions() -> list[dict]:
+    """Return list of chat sessions for the current client."""
+    if "dc_sessions" not in st.session_state:
+        st.session_state.dc_sessions = []
+    return st.session_state.dc_sessions
+
+
+def _create_session(label: str | None = None) -> dict:
+    """Create a new chat session and return it."""
+    sessions = _get_chat_sessions()
+    idx = len(sessions) + 1
+    session = {
+        "id": uuid.uuid4().hex[:8],
+        "label": label or f"Chat {idx}",
+        "messages": [],
+        "df_cache": {},
+    }
+    sessions.append(session)
+    return session
+
+
+def _get_session(session_id: str) -> dict | None:
+    """Find a session by ID."""
+    for s in _get_chat_sessions():
+        if s["id"] == session_id:
+            return s
+    return None
+
+
+# ---------------------------------------------------------------------------
+# DataFrame result cache — per-session
 # ---------------------------------------------------------------------------
 
 
-def _get_result_cache() -> dict:
-    """Return the SQL→DataFrame cache from session state."""
-    if "_df_cache" not in st.session_state:
-        st.session_state._df_cache = {}
-    return st.session_state._df_cache
-
-
-def cache_result(sql: str, df: pd.DataFrame) -> None:
-    """Store a query result, evicting oldest if cache is full."""
-    cache = _get_result_cache()
+def cache_result(session: dict, sql: str, df: pd.DataFrame) -> None:
+    """Store a query result in the session cache."""
+    cache = session["df_cache"]
     cache[sql] = df
-    # Evict oldest entries if over limit
     while len(cache) > MAX_CACHED_RESULTS:
         oldest_key = next(iter(cache))
         del cache[oldest_key]
 
 
-def get_cached_result(sql: str) -> pd.DataFrame | None:
-    """Retrieve a cached query result, or None if expired/missing."""
-    return _get_result_cache().get(sql)
+def get_cached_result(session: dict, sql: str) -> pd.DataFrame | None:
+    """Retrieve a cached query result, or None if missing."""
+    return session["df_cache"].get(sql)
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +117,6 @@ def generate_sql(client, question: str, dataset: str, start_date: date, end_date
 
 def interpret_results(client, question: str, df: pd.DataFrame) -> tuple[str, dict | None]:
     """Use Claude to interpret query results and suggest visualization."""
-    # Convert DataFrame to markdown for Claude
     if len(df) > 50:
         results_md = df.head(50).to_markdown(index=False)
         results_md += f"\n\n... (showing first 50 of {len(df)} rows)"
@@ -114,13 +139,11 @@ def interpret_results(client, question: str, df: pd.DataFrame) -> tuple[str, dic
 
     answer = response.content[0].text.strip()
 
-    # Try to extract chart specification from the answer
     chart_spec = None
     chart_match = re.search(r'\{[^}]*"chart_type"[^}]*\}', answer)
     if chart_match:
         try:
             chart_spec = json.loads(chart_match.group())
-            # Remove the JSON from the answer text
             answer = answer.replace(chart_match.group(), '').strip()
         except json.JSONDecodeError:
             pass
@@ -157,7 +180,6 @@ def render_chart(df: pd.DataFrame, spec: dict):
     y = spec.get("y")
     color = spec.get("color")
 
-    # Validate columns exist
     if x and x not in df.columns:
         st.warning(f"Chart column '{x}' not found in results.")
         return
@@ -165,7 +187,7 @@ def render_chart(df: pd.DataFrame, spec: dict):
         st.warning(f"Chart column '{y}' not found in results.")
         return
     if color and color not in df.columns:
-        color = None  # Silently ignore missing color column
+        color = None
 
     try:
         if chart_type == "bar":
@@ -187,13 +209,130 @@ def render_chart(df: pd.DataFrame, spec: dict):
 
 
 # ---------------------------------------------------------------------------
-# Main chat interface
+# Render a single chat session inside its tab
+# ---------------------------------------------------------------------------
+
+def _render_chat_tab(session: dict, dataset: str, clients: dict):
+    """Render the chat interface for one session."""
+    session_id = session["id"]
+
+    # --- Date range ---
+    col_start, col_end = st.columns(2)
+    start_date = col_start.date_input(
+        "From",
+        value=date.today() - timedelta(days=30),
+        key=f"dc_start_{session_id}",
+    )
+    end_date = col_end.date_input(
+        "To",
+        value=date.today() - timedelta(days=1),
+        key=f"dc_end_{session_id}",
+    )
+
+    if start_date > end_date:
+        st.error("Start date must be before end date.")
+        return
+
+    st.divider()
+
+    # --- Display chat history ---
+    for message in session["messages"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+            if message.get("sql"):
+                with st.expander("View SQL Query"):
+                    st.code(message["sql"], language="sql")
+
+                cached_df = get_cached_result(session, message["sql"])
+                if cached_df is not None and not cached_df.empty:
+                    st.dataframe(cached_df, width="stretch", hide_index=True, height=min(400, len(cached_df) * 35 + 40))
+
+                    if message.get("chart_spec"):
+                        render_chart(cached_df, message["chart_spec"])
+
+    # --- Chat input ---
+    if prompt := st.chat_input("Ask a question about your data...", key=f"dc_input_{session_id}"):
+        session["messages"].append({"role": "user", "content": prompt})
+
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    anthropic_client = get_anthropic_client()
+
+                    if dataset == "all":
+                        query_dataset = list(clients.keys())[0]
+                    else:
+                        query_dataset = dataset
+
+                    # Step 1: Generate SQL
+                    sql = generate_sql(anthropic_client, prompt, query_dataset, start_date, end_date)
+
+                    is_valid, error_msg = validate_sql(sql)
+                    if not is_valid:
+                        st.error(f"Invalid query: {error_msg}")
+                        session["messages"].append({
+                            "role": "assistant",
+                            "content": f"I couldn't generate a safe query: {error_msg}",
+                        })
+                        st.stop()
+
+                    sql = ensure_limit(sql)
+
+                    with st.expander("View SQL Query", expanded=False):
+                        st.code(sql, language="sql")
+
+                    # Step 2: Execute query
+                    with st.spinner("Running query..."):
+                        df = execute_query(sql)
+
+                    if df.empty:
+                        answer = "The query returned no results. Try adjusting your date range or question."
+                        st.markdown(answer)
+                        session["messages"].append({
+                            "role": "assistant",
+                            "content": answer,
+                            "sql": sql,
+                        })
+                    else:
+                        cache_result(session, sql, df)
+
+                        st.dataframe(df, width="stretch", hide_index=True, height=min(400, len(df) * 35 + 40))
+
+                        with st.spinner("Analyzing results..."):
+                            answer, chart_spec = interpret_results(anthropic_client, prompt, df)
+
+                        st.markdown(answer)
+
+                        if chart_spec:
+                            render_chart(df, chart_spec)
+
+                        session["messages"].append({
+                            "role": "assistant",
+                            "content": answer,
+                            "sql": sql,
+                            "chart_spec": chart_spec,
+                        })
+
+                except Exception as e:
+                    error_msg = f"Error: {str(e)}"
+                    st.error(error_msg)
+                    session["messages"].append({
+                        "role": "assistant",
+                        "content": error_msg,
+                    })
+
+
+# ---------------------------------------------------------------------------
+# Main page layout
 # ---------------------------------------------------------------------------
 
 st.title("Data Chat")
 st.caption("Ask questions about your Amazon advertising data using natural language.")
 
-# --- Top bar: client, date range, clear chat ---
 clients = get_ads_clients()
 if not clients:
     st.warning("No client datasets found.")
@@ -201,138 +340,52 @@ if not clients:
 
 client_options = {"all": "All Clients", **clients}
 
-col_client, col_start, col_end, col_clear = st.columns([3, 2, 2, 1])
+# --- Top bar: Client selector + New Chat button ---
+col_client, col_spacer, col_new = st.columns([3, 5, 2])
 
 with col_client:
     selected_client = st.selectbox(
         "Client",
         options=list(client_options.keys()),
         format_func=lambda k: client_options[k],
-        key="chat_client",
+        key="dc_client",
     )
 
-default_start = date.today() - timedelta(days=30)
-default_end = date.today() - timedelta(days=1)
+with col_new:
+    st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
+    new_chat_clicked = st.button("+ New Chat", key="dc_new_chat_btn")
 
-with col_start:
-    start_date = st.date_input("From", value=default_start, key="chat_date_start")
-with col_end:
-    end_date = st.date_input("To", value=default_end, key="chat_date_end")
-with col_clear:
-    st.markdown("<div style='height: 5px'></div>", unsafe_allow_html=True)
-    if st.button("Clear", key="clear_chat_btn"):
-        st.session_state.messages = []
-        st.rerun()
+# --- Reset sessions when client changes ---
+prev = st.session_state.get("dc_prev_client")
+if prev is not None and prev != selected_client:
+    st.session_state.dc_sessions = []
+    st.session_state.pop("dc_active_tab", None)
+    st.session_state.dc_prev_client = selected_client
+    st.rerun()
+st.session_state.dc_prev_client = selected_client
 
-if start_date > end_date:
-    st.error("Start date must be before end date.")
-    st.stop()
+# --- Ensure at least one session exists ---
+sessions = _get_chat_sessions()
+if not sessions:
+    _create_session("Chat 1")
+    sessions = _get_chat_sessions()
 
-# Initialize chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# --- Handle new chat button ---
+if new_chat_clicked:
+    new_session = _create_session()
+    st.session_state.dc_active_tab = new_session["label"]
+    st.rerun()
 
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# --- Build tabs ---
+tab_labels = [s["label"] for s in sessions]
 
-        # Show SQL if present (for assistant messages)
-        if message.get("sql"):
-            with st.expander("View SQL Query"):
-                st.code(message["sql"], language="sql")
+active = st.session_state.get("dc_active_tab")
+if active not in tab_labels:
+    st.session_state.dc_active_tab = tab_labels[0]
 
-            # Look up cached DataFrame by SQL
-            cached_df = get_cached_result(message["sql"])
-            if cached_df is not None and not cached_df.empty:
-                st.dataframe(cached_df, width="stretch", hide_index=True, height=min(400, len(cached_df) * 35 + 40))
+tabs = st.tabs(tab_labels)
 
-                # Show chart if present
-                if message.get("chart_spec"):
-                    render_chart(cached_df, message["chart_spec"])
-
-# Chat input
-if prompt := st.chat_input("Ask a question about your data..."):
-    # Add user message to history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # Process with Claude
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                anthropic_client = get_anthropic_client()
-
-                # Determine dataset context
-                if selected_client == "all":
-                    # Use first available client as reference, Claude will handle UNION
-                    dataset = list(clients.keys())[0]
-                else:
-                    dataset = selected_client
-
-                # Step 1: Generate SQL
-                sql = generate_sql(anthropic_client, prompt, dataset, start_date, end_date)
-
-                # Validate SQL
-                is_valid, error_msg = validate_sql(sql)
-                if not is_valid:
-                    st.error(f"Invalid query: {error_msg}")
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"I couldn't generate a safe query: {error_msg}",
-                    })
-                    st.stop()
-
-                # Ensure LIMIT
-                sql = ensure_limit(sql)
-
-                # Show SQL
-                with st.expander("View SQL Query", expanded=False):
-                    st.code(sql, language="sql")
-
-                # Step 2: Execute query
-                with st.spinner("Running query..."):
-                    df = execute_query(sql)
-
-                if df.empty:
-                    answer = "The query returned no results. Try adjusting your date range or question."
-                    st.markdown(answer)
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "sql": sql,
-                    })
-                else:
-                    # Cache the result (not in message)
-                    cache_result(sql, df)
-
-                    # Show results table
-                    st.dataframe(df, width="stretch", hide_index=True, height=min(400, len(df) * 35 + 40))
-
-                    # Step 3: Interpret results
-                    with st.spinner("Analyzing results..."):
-                        answer, chart_spec = interpret_results(anthropic_client, prompt, df)
-
-                    st.markdown(answer)
-
-                    # Render chart if suggested
-                    if chart_spec:
-                        render_chart(df, chart_spec)
-
-                    # Save to history (DataFrame stored in cache, not here)
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "sql": sql,
-                        "chart_spec": chart_spec,
-                    })
-
-            except Exception as e:
-                error_msg = f"Error: {str(e)}"
-                st.error(error_msg)
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": error_msg,
-                })
+# --- Render each tab ---
+for tab, session in zip(tabs, sessions):
+    with tab:
+        _render_chat_tab(session, selected_client, clients)
