@@ -4,18 +4,35 @@ SCHEMA_CONTEXT = """
 ## Available Datasets
 Each client has their own dataset prefixed with `adp_`:
 - adp_client_07
+- adp_client_05
 - adp_client_01
 - adp_client_12
-- adp_client_18
-- adp_client_05
-- adp_client_21
-- adp_client_22
-- adp_client_19
-- adp_client_17
-- adp_client_20
-- adp_client_16
+- adp_client_06
+- adp_client_03
+- adp_client_10
+- adp_client_14
 
 ## Views (recommended - deduplicated with pre-calculated KPIs)
+
+All views contain a `client_id` (STRING) column that identifies the client.
+
+### v_ads_summary_daily
+Client-level daily totals (aggregated across all campaigns).
+Columns:
+- date (DATE)
+- active_campaigns (INT64): Number of active campaigns that day
+- impressions (INT64)
+- clicks (INT64)
+- cost (FLOAT64)
+- purchases (INT64)
+- sales (FLOAT64)
+- units_sold (INT64)
+- acos (FLOAT64): percentage
+- roas (FLOAT64)
+- ctr (FLOAT64): percentage
+- cpc (FLOAT64)
+- cvr (FLOAT64): percentage
+- client_id (STRING)
 
 ### v_ads_campaign_daily
 Campaign-level daily performance metrics.
@@ -37,6 +54,7 @@ Columns:
 - ctr (FLOAT64): Click-through rate (clicks/impressions * 100), as percentage
 - cpc (FLOAT64): Cost per click (cost/clicks)
 - cvr (FLOAT64): Conversion rate (purchases/clicks * 100), as percentage
+- client_id (STRING)
 
 ### v_ads_adgroup_daily
 Ad group level daily performance.
@@ -55,6 +73,7 @@ Columns:
 - ctr (FLOAT64): percentage
 - cpc (FLOAT64)
 - cvr (FLOAT64): percentage
+- client_id (STRING)
 
 ### v_ads_asin_daily
 ASIN-level daily performance (product-level metrics).
@@ -74,12 +93,21 @@ Columns:
 - ctr (FLOAT64): percentage
 - cpc (FLOAT64)
 - cvr (FLOAT64): percentage
+- client_id (STRING)
 
-### v_ads_summary_daily
-Client-level daily totals (aggregated across all campaigns).
+### v_ads_searchterm_daily
+Search term performance — which customer search queries trigger ads.
 Columns:
 - date (DATE)
-- active_campaigns (INT64): Number of active campaigns that day
+- search_term (STRING): Customer's search query
+- keyword (STRING): Matched keyword from campaign
+- keyword_id (STRING)
+- keyword_type (STRING)
+- match_type (STRING): BROAD, PHRASE, EXACT
+- campaign_name (STRING)
+- campaign_id (STRING)
+- ad_group_name (STRING)
+- ad_group_id (STRING)
 - impressions (INT64)
 - clicks (INT64)
 - cost (FLOAT64)
@@ -91,6 +119,7 @@ Columns:
 - ctr (FLOAT64): percentage
 - cpc (FLOAT64)
 - cvr (FLOAT64): percentage
+- client_id (STRING)
 
 ## Query Patterns
 
@@ -103,24 +132,22 @@ ORDER BY cost DESC
 LIMIT 10
 ```
 
-### Cross-client comparison (use UNION ALL)
+### Cross-client comparison (use client_id within a single view)
 ```sql
-SELECT 'client_07' AS client, SUM(cost) AS total_cost, SUM(sales) AS total_sales
+SELECT client_id, SUM(cost) AS total_cost, SUM(sales) AS total_sales
 FROM `example-gcp-project.adp_client_07.v_ads_summary_daily`
 WHERE date BETWEEN '2025-01-01' AND '2025-01-31'
-UNION ALL
-SELECT 'client_01' AS client, SUM(cost) AS total_cost, SUM(sales) AS total_sales
-FROM `example-gcp-project.adp_client_01.v_ads_summary_daily`
-WHERE date BETWEEN '2025-01-01' AND '2025-01-31'
+GROUP BY client_id
 ```
 
 ## Important Notes
-- All monetary values (cost, sales, budget) are in EUR
+- All monetary values (cost, sales, budget) are in EUR (except US marketplace clients like client_06 which use USD)
 - ACoS, CTR, and CVR are stored as percentages (e.g., 25.5 means 25.5%)
 - ROAS is a ratio (e.g., 4.0 means 4x return)
 - Always use LIMIT to avoid returning too many rows
 - Use SAFE_DIVIDE for calculations to avoid division by zero
 - Date format is YYYY-MM-DD
+- Each view has different columns. NEVER use UNION ALL across different views (e.g., do NOT combine v_ads_summary_daily with v_ads_campaign_daily). Only UNION ALL the same view across different datasets.
 """
 
 SQL_GENERATION_PROMPT = """You are a SQL expert for Amazon advertising data stored in BigQuery.
@@ -135,9 +162,11 @@ Given a user question, generate a SQL query to answer it.
 4. For date ranges, use BETWEEN with 'YYYY-MM-DD' format
 5. Use SAFE_DIVIDE for any division operations
 6. Return ONLY the SQL query, no explanations or markdown code blocks
-7. If asked about "all clients" or comparing clients, use UNION ALL across datasets
-8. For aggregations, use appropriate GROUP BY clauses
-9. Round numeric results to 2 decimal places where appropriate
+7. For aggregations, use appropriate GROUP BY clauses
+8. Round numeric results to 2 decimal places where appropriate
+9. UNION ALL requires all SELECT statements to have identical columns. NEVER combine different views in a UNION ALL. Only UNION ALL the same view across different datasets.
+10. All views have a `client_id` column. Prefer using it for cross-client queries within a single view instead of UNION ALL across datasets.
+11. For search term analysis or keyword questions, use `v_ads_searchterm_daily`.
 
 ## Current Context
 - Selected client dataset: {dataset}

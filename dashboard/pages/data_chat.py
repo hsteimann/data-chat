@@ -100,7 +100,7 @@ def generate_sql(client, question: str, dataset: str, start_date: date, end_date
     )
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=2048,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -129,7 +129,7 @@ def interpret_results(client, question: str, df: pd.DataFrame) -> tuple[str, dic
     )
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=2048,
         messages=[
             {"role": "user", "content": f"Original question: {question}"},
