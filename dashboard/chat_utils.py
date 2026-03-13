@@ -1,7 +1,6 @@
 """Shared utilities for chat-driven dashboard pages (SQL validation, widget spec extraction, Claude client)."""
 
 import json
-import os
 import re
 
 import streamlit as st
@@ -59,7 +58,7 @@ def clean_response(text: str) -> str:
 
 @st.cache_resource
 def get_anthropic_client():
-    """Get Anthropic client, checking for API key.
+    """Get Anthropic client, loading API key from Secret Manager.
 
     Shared by Data Chat and Views pages. Cached as a resource singleton.
     """
@@ -69,18 +68,12 @@ def get_anthropic_client():
         st.error("Anthropic SDK not installed. Run: `pip install anthropic`")
         st.stop()
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        try:
-            api_key = st.secrets.get("ANTHROPIC_API_KEY")
-        except Exception:
-            pass
+    try:
+        from adp.secrets import get_secret
 
-    if not api_key:
-        st.error(
-            "Anthropic API key not found. Set the `ANTHROPIC_API_KEY` environment variable "
-            "or add it to `.streamlit/secrets.toml`."
-        )
+        api_key = get_secret("ANTHROPIC_API_KEY")
+    except Exception as e:
+        st.error(f"Failed to load Anthropic API key from Secret Manager: {e}")
         st.stop()
 
     return anthropic.Anthropic(api_key=api_key)
