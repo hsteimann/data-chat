@@ -1,0 +1,313 @@
+# Views Registry — single source of truth for view/table schemas exposed to Data Chat.
+# Used by dashboard/chat_schema.py to build the Claude prompt dynamically.
+# Column definitions should match the actual SQL views in sql/views/*.sql.
+
+views:
+  v_ads_summary_daily:
+    description: "Client-level daily totals (aggregated across all campaigns)"
+    grain: "One row per client per day — the big-picture numbers."
+    use_for: "overall spend trends, total sales over time, daily/weekly/monthly performance summaries, comparing time periods, checking if spend or sales are up or down"
+    typical_questions:
+      - "How much did we spend last month?"
+      - "What's our overall ACoS trend?"
+      - "Compare this week vs last week."
+    columns:
+      - { name: date, type: DATE }
+      - { name: active_campaigns, type: INT64, description: "Number of active campaigns that day" }
+      - { name: impressions, type: INT64 }
+      - { name: clicks, type: INT64 }
+      - { name: cost, type: FLOAT64 }
+      - { name: purchases, type: INT64 }
+      - { name: sales, type: FLOAT64 }
+      - { name: units_sold, type: INT64 }
+      - { name: acos, type: FLOAT64, description: percentage }
+      - { name: roas, type: FLOAT64 }
+      - { name: ctr, type: FLOAT64, description: percentage }
+      - { name: cpc, type: FLOAT64 }
+      - { name: cvr, type: FLOAT64, description: percentage }
+      - { name: client_id, type: STRING }
+
+  v_ads_campaign_daily:
+    description: "Campaign-level daily performance metrics"
+    grain: "One row per campaign per day."
+    use_for: "identifying top/bottom campaigns, checking campaign budgets and status, analyzing spend distribution across campaigns, finding paused or underperforming campaigns"
+    typical_questions:
+      - "Which campaigns have the highest ACoS?"
+      - "Show me paused campaigns that were still spending"
+      - "Which campaign has the best ROAS?"
+      - "How is budget distributed across campaigns?"
+    columns:
+      - { name: date, type: DATE, description: "The reporting date" }
+      - { name: campaign_id, type: STRING, description: "Unique campaign identifier" }
+      - { name: campaign_name, type: STRING, description: "Human-readable campaign name" }
+      - { name: campaign_status, type: STRING, description: "e.g., ENABLED, PAUSED" }
+      - { name: budget, type: FLOAT64, description: "Daily budget in currency" }
+      - { name: currency, type: STRING, description: "Currency code (e.g., EUR)" }
+      - { name: impressions, type: INT64, description: "Number of ad impressions" }
+      - { name: clicks, type: INT64, description: "Number of ad clicks" }
+      - { name: cost, type: FLOAT64, description: "Total ad spend" }
+      - { name: purchases, type: INT64, description: "Number of attributed purchases" }
+      - { name: sales, type: FLOAT64, description: "Total attributed sales revenue" }
+      - { name: units_sold, type: INT64, description: "Number of units sold" }
+      - { name: acos, type: FLOAT64, description: "Advertising Cost of Sales (cost/sales * 100), as percentage" }
+      - { name: roas, type: FLOAT64, description: "Return on Ad Spend (sales/cost)" }
+      - { name: ctr, type: FLOAT64, description: "Click-through rate (clicks/impressions * 100), as percentage" }
+      - { name: cpc, type: FLOAT64, description: "Cost per click (cost/clicks)" }
+      - { name: cvr, type: FLOAT64, description: "Conversion rate (purchases/clicks * 100), as percentage" }
+      - { name: client_id, type: STRING }
+
+  v_ads_adgroup_daily:
+    description: "Ad group level daily performance"
+    grain: "One row per ad group per day."
+    extra_context: "Ad groups sit inside campaigns and group related keywords/targets together."
+    use_for: "finding which ad groups within a campaign perform best or worst, optimizing at the ad group level, comparing ad group strategies"
+    typical_questions:
+      - "Which ad groups are wasting spend?"
+      - "Show me the top ad groups by sales"
+      - "Which ad groups have high clicks but no conversions?"
+    columns:
+      - { name: date, type: DATE }
+      - { name: adgroup_id, type: STRING }
+      - { name: adgroup_name, type: STRING }
+      - { name: impressions, type: INT64 }
+      - { name: clicks, type: INT64 }
+      - { name: cost, type: FLOAT64 }
+      - { name: purchases, type: INT64 }
+      - { name: sales, type: FLOAT64 }
+      - { name: units_sold, type: INT64 }
+      - { name: acos, type: FLOAT64, description: percentage }
+      - { name: roas, type: FLOAT64 }
+      - { name: ctr, type: FLOAT64, description: percentage }
+      - { name: cpc, type: FLOAT64 }
+      - { name: cvr, type: FLOAT64, description: percentage }
+      - { name: client_id, type: STRING }
+
+  v_ads_asin_daily:
+    description: "ASIN-level daily performance (product-level metrics)"
+    grain: "One row per ASIN per campaign per day."
+    extra_context: "Each ASIN is a specific product. This view shows how each product performs in advertising."
+    use_for: "identifying best/worst-selling products, finding products with high ad spend but low sales, product-level profitability analysis, comparing product performance across campaigns"
+    typical_questions:
+      - "Which products have the worst ACoS?"
+      - "Show me the top 10 products by sales"
+      - "Which ASINs are getting clicks but no purchases?"
+      - "What's the ad performance for ASIN B0xxxxx?"
+    columns:
+      - { name: date, type: DATE }
+      - { name: asin, type: STRING, description: "Amazon Standard Identification Number" }
+      - { name: sku, type: STRING, description: "Stock Keeping Unit" }
+      - { name: campaign_name, type: STRING }
+      - { name: impressions, type: INT64 }
+      - { name: clicks, type: INT64 }
+      - { name: cost, type: FLOAT64 }
+      - { name: purchases, type: INT64 }
+      - { name: sales, type: FLOAT64 }
+      - { name: units_sold, type: INT64 }
+      - { name: acos, type: FLOAT64, description: percentage }
+      - { name: roas, type: FLOAT64 }
+      - { name: ctr, type: FLOAT64, description: percentage }
+      - { name: cpc, type: FLOAT64 }
+      - { name: cvr, type: FLOAT64, description: percentage }
+      - { name: client_id, type: STRING }
+
+  v_ads_searchterm_daily:
+    description: "Search term performance — which customer search queries triggered ads"
+    grain: "One row per search term per campaign per ad group per day."
+    extra_context: "This is the most granular view. It shows what customers actually typed into Amazon search and how those searches performed."
+    use_for: "keyword research, finding high-performing or wasted search terms, negative keyword candidates, match type analysis, understanding customer search behavior"
+    typical_questions:
+      - "Which search terms drive the most sales?"
+      - "Show me search terms with spend but zero purchases"
+      - "What are customers searching for?"
+      - "Which broad match terms should become exact match?"
+      - "Find negative keyword candidates (high cost, no sales)."
+    columns:
+      - { name: date, type: DATE }
+      - { name: search_term, type: STRING, description: "Customer's search query" }
+      - { name: keyword, type: STRING, description: "Matched keyword from campaign" }
+      - { name: keyword_id, type: STRING }
+      - { name: keyword_type, type: STRING }
+      - { name: match_type, type: STRING, description: "BROAD, PHRASE, EXACT" }
+      - { name: campaign_name, type: STRING }
+      - { name: campaign_id, type: STRING }
+      - { name: ad_group_name, type: STRING }
+      - { name: ad_group_id, type: STRING }
+      - { name: impressions, type: INT64 }
+      - { name: clicks, type: INT64 }
+      - { name: cost, type: FLOAT64 }
+      - { name: purchases, type: INT64 }
+      - { name: sales, type: FLOAT64 }
+      - { name: units_sold, type: INT64 }
+      - { name: acos, type: FLOAT64, description: percentage }
+      - { name: roas, type: FLOAT64 }
+      - { name: ctr, type: FLOAT64, description: percentage }
+      - { name: cpc, type: FLOAT64 }
+      - { name: cvr, type: FLOAT64, description: percentage }
+      - { name: client_id, type: STRING }
+
+  rf_products:
+    description: "Product catalog data collected via the Rainforest API"
+    grain: "One row per ASIN per snapshot."
+    is_raw_table: true
+    extra_context: "Contains product names, brand names, prices, ratings, Buy Box info, and availability — data that the ads views do NOT have."
+    use_for: "looking up product names or brands for ASINs, combining product info with ad performance, checking availability or Buy Box status alongside ad spend"
+    typical_questions:
+      - "Show top ASINs with product name and brand"
+      - "Which products have high ad spend but are out of stock?"
+      - "List advertised products with their ratings and prices."
+    important: "This is a raw table (not a view), and it may have multiple snapshots per ASIN. Always use the latest snapshot by filtering with ROW_NUMBER() OVER (PARTITION BY asin ORDER BY snapshot_date DESC) = 1."
+    columns:
+      - { name: snapshot_date, type: STRING, description: "Date the product data was collected (YYYY-MM-DD)" }
+      - { name: asin, type: STRING, description: "Amazon Standard Identification Number — JOIN key with v_ads_asin_daily" }
+      - { name: collection_id, type: STRING, description: "Rainforest collection identifier" }
+      - { name: title, type: STRING, description: "Product title / name" }
+      - { name: brand, type: STRING, description: "Brand name" }
+      - { name: link, type: STRING, description: "Amazon product page URL" }
+      - { name: rating, type: FLOAT64, description: "Average star rating (1-5)" }
+      - { name: ratings_total, type: INT64, description: "Total number of ratings" }
+      - { name: images_count, type: INT64 }
+      - { name: has_a_plus_content, type: BOOLEAN }
+      - { name: has_brand_story, type: BOOLEAN }
+      - { name: feature_bullets_count, type: INT64 }
+      - { name: videos_count, type: INT64 }
+      - { name: bestsellers_rank_flat, type: STRING, description: "BSR as text" }
+      - { name: bestsellers_rank_1, type: INT64, description: "Primary BSR rank" }
+      - { name: bestsellers_rank_1_category, type: STRING, description: "Primary BSR category" }
+      - { name: categories_flat, type: STRING }
+      - { name: recent_sales, type: STRING }
+      - { name: buybox_price, type: FLOAT64 }
+      - { name: buybox_currency, type: STRING }
+      - { name: buybox_rrp, type: FLOAT64, description: "Recommended retail price" }
+      - { name: buybox_seller_name, type: STRING }
+      - { name: buybox_seller_id, type: STRING }
+      - { name: is_sold_by_amazon, type: BOOLEAN }
+      - { name: is_fulfilled_by_amazon, type: BOOLEAN }
+      - { name: is_prime, type: BOOLEAN }
+      - { name: availability_type, type: STRING }
+      - { name: availability_raw, type: STRING }
+      - { name: client_id, type: STRING }
+      - { name: loaded_at, type: STRING, description: "When the data was loaded into BigQuery" }
+
+
+# ── JOIN Relationships ──────────────────────────────────────────────────
+
+join_relationships:
+  - view_a: v_ads_campaign_daily
+    view_b: v_ads_searchterm_daily
+    keys: [campaign_id, date]
+  - view_a: v_ads_campaign_daily
+    view_b: v_ads_asin_daily
+    keys: [campaign_name, date]
+  - view_a: v_ads_adgroup_daily
+    view_b: v_ads_searchterm_daily
+    keys: ["adgroup_id = ad_group_id", date]
+  - view_a: v_ads_asin_daily
+    view_b: rf_products
+    keys: [asin]
+  - view_a: v_ads_campaign_daily
+    view_b: rf_products
+    keys: ["(via v_ads_asin_daily as bridge: campaign_name + asin)"]
+
+join_notes:
+  - "v_ads_asin_daily does NOT have campaign_id — use campaign_name to join with campaign data."
+  - "v_ads_adgroup_daily does NOT have campaign_id or campaign_name — join it only with searchterm_daily via adgroup_id."
+  - "v_ads_summary_daily is an aggregation of campaign_daily. Do not JOIN them — query campaign_daily directly instead."
+  - "rf_products is a raw table, NOT a view. Always deduplicate to the latest snapshot per ASIN using: ROW_NUMBER() OVER (PARTITION BY asin ORDER BY snapshot_date DESC) = 1."
+  - "rf_products uses the fully qualified name `example-gcp-project.{dataset}.rf_products` (same dataset as the views)."
+  - "All views share client_id and date. Always include both in JOIN conditions when applicable."
+
+
+# ── Query Examples ──────────────────────────────────────────────────────
+
+query_examples:
+  - name: "Single client query"
+    sql: |
+      SELECT date, campaign_name, cost, sales, acos
+      FROM `example-gcp-project.adp_client_07.v_ads_campaign_daily`
+      WHERE date BETWEEN '2025-01-01' AND '2025-01-31'
+      ORDER BY cost DESC
+      LIMIT 10
+
+  - name: "Cross-client comparison (use client_id within a single view)"
+    sql: |
+      SELECT client_id, SUM(cost) AS total_cost, SUM(sales) AS total_sales
+      FROM `example-gcp-project.adp_client_07.v_ads_summary_daily`
+      WHERE date BETWEEN '2025-01-01' AND '2025-01-31'
+      GROUP BY client_id
+
+  - name: "JOIN: Campaign budget + status with ASIN product performance"
+    sql: |
+      SELECT
+        c.date,
+        c.campaign_name,
+        c.campaign_status,
+        c.budget,
+        a.asin,
+        a.sku,
+        a.impressions,
+        a.clicks,
+        a.cost,
+        a.sales,
+        a.acos
+      FROM `example-gcp-project.adp_client_07.v_ads_campaign_daily` c
+      JOIN `example-gcp-project.adp_client_07.v_ads_asin_daily` a
+        ON c.campaign_name = a.campaign_name AND c.date = a.date
+      WHERE c.date BETWEEN '2025-01-01' AND '2025-01-31'
+      ORDER BY a.cost DESC
+      LIMIT 100
+
+  - name: "JOIN: Campaign details with search term performance"
+    sql: |
+      SELECT
+        c.campaign_name,
+        c.campaign_status,
+        c.budget,
+        s.search_term,
+        s.match_type,
+        s.impressions,
+        s.clicks,
+        s.cost,
+        s.sales,
+        s.acos
+      FROM `example-gcp-project.adp_client_07.v_ads_campaign_daily` c
+      JOIN `example-gcp-project.adp_client_07.v_ads_searchterm_daily` s
+        ON c.campaign_id = s.campaign_id AND c.date = s.date
+      WHERE c.date BETWEEN '2025-01-01' AND '2025-01-31'
+        AND s.clicks > 0
+      ORDER BY s.cost DESC
+      LIMIT 100
+
+  - name: "JOIN: Top ASINs with product name and brand from Rainforest data"
+    sql: |
+      WITH rf_latest AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY asin ORDER BY snapshot_date DESC) AS _rn
+        FROM `example-gcp-project.adp_client_07.rf_products`
+      )
+      SELECT
+        a.asin,
+        rf.title AS product_name,
+        rf.brand,
+        SUM(a.impressions) AS impressions,
+        SUM(a.clicks) AS clicks,
+        ROUND(SUM(a.cost), 2) AS cost,
+        SUM(a.purchases) AS purchases,
+        ROUND(SUM(a.sales), 2) AS sales,
+        ROUND(SAFE_DIVIDE(SUM(a.cost), SUM(a.sales)) * 100, 2) AS acos
+      FROM `example-gcp-project.adp_client_07.v_ads_asin_daily` a
+      LEFT JOIN rf_latest rf ON a.asin = rf.asin AND rf._rn = 1
+      WHERE a.date BETWEEN '2025-01-01' AND '2025-01-31'
+      GROUP BY a.asin, rf.title, rf.brand
+      ORDER BY sales DESC
+      LIMIT 10
+
+
+# ── AI Warnings (important rules for SQL generation) ────────────────────
+
+ai_warnings:
+  - "All monetary values (cost, sales, budget) are in EUR (except US marketplace clients like client_06 which use USD)"
+  - "ACoS, CTR, and CVR are stored as percentages (e.g., 25.5 means 25.5%)"
+  - "ROAS is a ratio (e.g., 4.0 means 4x return)"
+  - "Always use LIMIT to avoid returning too many rows"
+  - "Use SAFE_DIVIDE for calculations to avoid division by zero"
+  - "Date format is YYYY-MM-DD"
+  - "Each view has different columns. NEVER use UNION ALL across different views (e.g., do NOT combine v_ads_summary_daily with v_ads_campaign_daily). Only UNION ALL the same view across different datasets."
