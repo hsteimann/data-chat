@@ -35,6 +35,12 @@ def validate_sql(sql: str) -> tuple[bool, str]:
     for keyword in dangerous:
         if re.search(rf"\b{keyword}\b", sql_no_strings):
             return False, f"Query contains forbidden keyword: {keyword}"
+
+    # Catch unresolved template placeholders like {project}, {dataset}
+    placeholders = re.findall(r"\{(\w+)\}", sql_clean)
+    if placeholders:
+        return False, f"Query contains unresolved placeholders: {{{', '.join(placeholders)}}}"
+
     return True, ""
 
 

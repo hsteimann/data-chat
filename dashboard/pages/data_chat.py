@@ -163,10 +163,23 @@ def ensure_limit(sql: str) -> str:
     return sql
 
 
-def execute_query(sql: str) -> pd.DataFrame:
-    """Execute SQL query against BigQuery."""
+def execute_query(sql: str) -> tuple[pd.DataFrame, str | None]:
+    """Execute SQL query against BigQuery.
+
+    Returns (DataFrame, job_id) so callers can cancel the job if needed.
+    """
     client = get_bq_client()
-    return client.query(sql).to_dataframe(create_bqstorage_client=False)
+    job = client.query(sql)
+    return job.to_dataframe(create_bqstorage_client=False), job.job_id
+
+
+def cancel_bq_job(job_id: str) -> None:
+    """Best-effort cancellation of a running BigQuery job."""
+    try:
+        client = get_bq_client()
+        client.cancel_job(job_id)
+    except Exception:
+        pass  # Job may already be finished
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +225,23 @@ def render_chart(df: pd.DataFrame, spec: dict):
 # Render a single chat session inside its tab
 # ---------------------------------------------------------------------------
 
+def _proc_key(session_id: str) -> str:
+    return f"dc_proc_{session_id}"
+
+
+def _cancel_processing(session_id: str) -> None:
+    """Cancel the current processing pipeline for a session."""
+    key = _proc_key(session_id)
+    proc = st.session_state.get(key)
+    if proc and proc.get("bq_job_id"):
+        cancel_bq_job(proc["bq_job_id"])
+    st.session_state.pop(key, None)
+
+
 def _render_chat_tab(session: dict, dataset: str, clients: dict):
     """Render the chat interface for one session."""
     session_id = session["id"]
+    proc_key = _proc_key(session_id)
 
     # --- Date range ---
     col_start, col_end = st.columns(2)
@@ -235,6 +262,8 @@ def _render_chat_tab(session: dict, dataset: str, clients: dict):
 
     st.divider()
 
+    is_processing = proc_key in st.session_state
+
     # --- Display chat history ---
     for message in session["messages"]:
         with st.chat_message(message["role"]):
@@ -251,25 +280,31 @@ def _render_chat_tab(session: dict, dataset: str, clients: dict):
                     if message.get("chart_spec"):
                         render_chart(cached_df, message["chart_spec"])
 
-    # --- Chat input ---
-    if prompt := st.chat_input("Ask a question about your data...", key=f"dc_input_{session_id}"):
-        session["messages"].append({"role": "user", "content": prompt})
-
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # --- Processing pipeline (state machine) ---
+    if is_processing:
+        proc = st.session_state[proc_key]
+        phase = proc["phase"]
+        question = proc["question"]
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    anthropic_client = get_anthropic_client()
+            # Cancel button — active between phases
+            if st.button("Cancel", key=f"dc_cancel_{session_id}", type="secondary"):
+                _cancel_processing(session_id)
+                session["messages"].append({
+                    "role": "assistant",
+                    "content": "Cancelled.",
+                })
+                st.rerun()
 
-                    if dataset == "all":
-                        query_dataset = list(clients.keys())[0]
-                    else:
-                        query_dataset = dataset
-
-                    # Step 1: Generate SQL
-                    sql = generate_sql(anthropic_client, prompt, query_dataset, start_date, end_date)
+            try:
+                # ---- Phase 1: Generate SQL ----
+                if phase == "generate_sql":
+                    with st.spinner("Generating SQL..."):
+                        anthropic_client = get_anthropic_client()
+                        sql = generate_sql(
+                            anthropic_client, question,
+                            proc["dataset"], proc["start_date"], proc["end_date"],
+                        )
 
                     is_valid, error_msg = validate_sql(sql)
                     if not is_valid:
@@ -278,16 +313,23 @@ def _render_chat_tab(session: dict, dataset: str, clients: dict):
                             "role": "assistant",
                             "content": f"I couldn't generate a safe query: {error_msg}",
                         })
-                        st.stop()
+                        st.session_state.pop(proc_key, None)
+                        st.rerun()
 
                     sql = ensure_limit(sql)
+                    proc["sql"] = sql
+                    proc["phase"] = "execute_query"
+                    st.rerun()  # yield to UI so cancel button is responsive
 
+                # ---- Phase 2: Execute BigQuery ----
+                elif phase == "execute_query":
+                    sql = proc["sql"]
                     with st.expander("View SQL Query", expanded=False):
                         st.code(sql, language="sql")
 
-                    # Step 2: Execute query
                     with st.spinner("Running query..."):
-                        df = execute_query(sql)
+                        df, job_id = execute_query(sql)
+                        proc["bq_job_id"] = job_id
 
                     if df.empty:
                         answer = "The query returned no results. Try adjusting your date range or question."
@@ -297,33 +339,73 @@ def _render_chat_tab(session: dict, dataset: str, clients: dict):
                             "content": answer,
                             "sql": sql,
                         })
-                    else:
-                        cache_result(session, sql, df)
+                        st.session_state.pop(proc_key, None)
+                        st.rerun()
 
-                        st.dataframe(df, width="stretch", hide_index=True, height=min(400, len(df) * 35 + 40))
+                    cache_result(session, sql, df)
+                    proc["phase"] = "interpret"
+                    st.rerun()  # yield to UI
 
-                        with st.spinner("Analyzing results..."):
-                            answer, chart_spec = interpret_results(anthropic_client, prompt, df)
+                # ---- Phase 3: Interpret results ----
+                elif phase == "interpret":
+                    sql = proc["sql"]
+                    df = get_cached_result(session, sql)
 
-                        st.markdown(answer)
+                    with st.expander("View SQL Query", expanded=False):
+                        st.code(sql, language="sql")
 
-                        if chart_spec:
-                            render_chart(df, chart_spec)
+                    st.dataframe(df, width="stretch", hide_index=True, height=min(400, len(df) * 35 + 40))
 
-                        session["messages"].append({
-                            "role": "assistant",
-                            "content": answer,
-                            "sql": sql,
-                            "chart_spec": chart_spec,
-                        })
+                    with st.spinner("Analyzing results..."):
+                        anthropic_client = get_anthropic_client()
+                        answer, chart_spec = interpret_results(anthropic_client, question, df)
 
-                except Exception as e:
-                    error_msg = f"Error: {str(e)}"
-                    st.error(error_msg)
+                    st.markdown(answer)
+
+                    if chart_spec:
+                        render_chart(df, chart_spec)
+
                     session["messages"].append({
                         "role": "assistant",
-                        "content": error_msg,
+                        "content": answer,
+                        "sql": sql,
+                        "chart_spec": chart_spec,
                     })
+                    st.session_state.pop(proc_key, None)
+                    st.rerun()
+
+            except Exception as e:
+                error_msg = f"Error: {str(e)}"
+                st.error(error_msg)
+                session["messages"].append({
+                    "role": "assistant",
+                    "content": error_msg,
+                })
+                st.session_state.pop(proc_key, None)
+
+    # --- Chat input (disabled while processing) ---
+    if prompt := st.chat_input(
+        "Ask a question about your data...",
+        key=f"dc_input_{session_id}",
+        disabled=is_processing,
+    ):
+        session["messages"].append({"role": "user", "content": prompt})
+
+        if dataset == "all":
+            query_dataset = list(clients.keys())[0]
+        else:
+            query_dataset = dataset
+
+        st.session_state[proc_key] = {
+            "phase": "generate_sql",
+            "question": prompt,
+            "dataset": query_dataset,
+            "start_date": start_date,
+            "end_date": end_date,
+            "sql": None,
+            "bq_job_id": None,
+        }
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
