@@ -1,5 +1,5 @@
-# Views Registry — single source of truth for view/table schemas exposed to Data Chat.
-# Used by dashboard/chat_schema.py to build the Claude prompt dynamically.
+# Data Catalog — single source of truth for queryable views and tables.
+# Used by Data Chat and Custom Views builder to understand the schema.
 # Column definitions should match the actual SQL views in sql/views/*.sql.
 
 views:

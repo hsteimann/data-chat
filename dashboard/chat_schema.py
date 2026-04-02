@@ -1,6 +1,6 @@
 """BigQuery schema context for Claude AI chat integration.
 
-Builds the schema context dynamically from config/views_registry.yaml
+Builds the schema context dynamically from config/data_catalog.yaml
 instead of hardcoding it. Falls back to a static string if the YAML
 is not available (e.g., during migration).
 """
@@ -15,17 +15,17 @@ from adp.config import _resolve_config_dir
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Load views registry from config
+# Load data catalog from config
 # ---------------------------------------------------------------------------
 
 
-def _load_views_registry() -> dict | None:
-    """Load views_registry.yaml from the resolved config directory."""
+def load_data_catalog() -> dict | None:
+    """Load data_catalog.yaml from the resolved config directory."""
     try:
         config_dir = _resolve_config_dir()
     except FileNotFoundError:
         return None
-    path = config_dir / "views_registry.yaml"
+    path = config_dir / "data_catalog.yaml"
     if not path.exists():
         return None
     with open(path) as f:
@@ -33,7 +33,7 @@ def _load_views_registry() -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Build schema context from registry
+# Build schema context from data catalog
 # ---------------------------------------------------------------------------
 
 
@@ -82,7 +82,7 @@ def _format_view(name: str, view: dict) -> str:
     return "\n".join(parts)
 
 
-def _format_joins(registry: dict) -> str:
+def _format_joins(catalog: dict) -> str:
     """Format JOIN relationships section."""
     parts = [
         "## View Relationships (for JOINs)",
@@ -94,48 +94,48 @@ def _format_joins(registry: dict) -> str:
         "|--------|--------|-----------|",
     ]
 
-    for rel in registry.get("join_relationships", []):
+    for rel in catalog.get("join_relationships", []):
         keys = " + ".join(rel["keys"])
         parts.append(f"| {rel['view_a']} | {rel['view_b']} | {keys} |")
 
     parts.append("")
     parts.append("Notes:")
-    for note in registry.get("join_notes", []):
+    for note in catalog.get("join_notes", []):
         parts.append(f"- {note}")
 
     return "\n".join(parts)
 
 
-def _format_examples(registry: dict) -> str:
+def _format_examples(catalog: dict) -> str:
     """Format query examples section."""
     parts = ["## Query Patterns"]
 
-    for ex in registry.get("query_examples", []):
+    for ex in catalog.get("query_examples", []):
         parts.append(f"\n### {ex['name']}")
         parts.append(f"```sql\n{ex['sql'].strip()}\n```")
 
     return "\n".join(parts)
 
 
-def _format_warnings(registry: dict) -> str:
+def _format_warnings(catalog: dict) -> str:
     """Format AI warnings section."""
     parts = ["## Important Notes"]
-    for warning in registry.get("ai_warnings", []):
+    for warning in catalog.get("ai_warnings", []):
         parts.append(f"- {warning}")
     return "\n".join(parts)
 
 
 def build_schema_context(datasets: list[str]) -> str:
-    """Build the schema context string from views_registry.yaml.
+    """Build the schema context string from data_catalog.yaml.
 
     Parameters
     ----------
     datasets:
         List of client dataset names (e.g., ["adp_client_07", "adp_client_01"]).
     """
-    registry = _load_views_registry()
-    if registry is None:
-        logger.warning("views_registry.yaml not found, using fallback")
+    catalog = load_data_catalog()
+    if catalog is None:
+        logger.warning("data_catalog.yaml not found, using fallback")
         return _FALLBACK_SCHEMA_CONTEXT
 
     parts = []
@@ -153,20 +153,20 @@ def build_schema_context(datasets: list[str]) -> str:
     parts.append("All views contain a `client_id` (STRING) column that identifies the client.")
     parts.append("")
 
-    for name, view in registry.get("views", {}).items():
+    for name, view in catalog.get("views", {}).items():
         parts.append(_format_view(name, view))
         parts.append("")
 
     # JOINs
-    parts.append(_format_joins(registry))
+    parts.append(_format_joins(catalog))
     parts.append("")
 
     # Examples
-    parts.append(_format_examples(registry))
+    parts.append(_format_examples(catalog))
     parts.append("")
 
     # Warnings
-    parts.append(_format_warnings(registry))
+    parts.append(_format_warnings(catalog))
 
     return "\n".join(parts)
 
@@ -218,7 +218,7 @@ Do not repeat the raw data - the table is already displayed.
 
 
 # ---------------------------------------------------------------------------
-# Fallback: used only if views_registry.yaml is not found
+# Fallback: used only if data_catalog.yaml is not found
 # ---------------------------------------------------------------------------
 
 _FALLBACK_SCHEMA_CONTEXT = """
