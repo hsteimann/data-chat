@@ -189,6 +189,165 @@ views:
       - { name: loaded_at, type: STRING, description: "When the data was loaded into BigQuery" }
 
 
+  pma_sales_traffic_by_date:
+    description: "Daily aggregate Seller Central sales, traffic, and conversion metrics"
+    grain: "One row per day per marketplace. Account-level totals."
+    is_raw_table: true
+    extra_context: "These are ORGANIC Seller Central metrics — total sales from all sources (organic + ads + direct). Do NOT compare directly with Ads API sales which use click-attribution windows. Sourced via PowerMyAnalytics API."
+    use_for: "total daily revenue and units, session and page view trends, Buy Box win rate monitoring, conversion rate tracking, shipped vs ordered analysis, refund rate monitoring"
+    typical_questions:
+      - "What was the total revenue yesterday?"
+      - "How many sessions did we get last week?"
+      - "What's our Buy Box percentage trend?"
+      - "What's the conversion rate over the last 30 days?"
+      - "How many units were refunded this month?"
+    important: "Averages and percentages (refundRate, buyBoxPercentage, unitSessionPercentage, etc.) are pre-computed daily values. Do NOT sum them across days — recalculate from underlying totals. For example, weekly conversion rate = SUM(sales_totalOrderItems) / SUM(traffic_sessions) * 100."
+    columns:
+      - { name: date, type: STRING, description: "Business date YYYY-MM-DD (marketplace timezone)" }
+      - { name: account_id, type: STRING, description: "Amazon seller account ID" }
+      - { name: marketplace_id, type: STRING, description: "Amazon marketplace (ID_CLIENT_01 = DE)" }
+      - { name: sales_orderedProductSales_amount, type: FLOAT64, description: "Total ordered product sales revenue" }
+      - { name: sales_orderedProductSales_currencyCode, type: STRING, description: "Currency (EUR, USD)" }
+      - { name: sales_orderedProductSalesB2B_amount, type: FLOAT64, description: "B2B ordered sales revenue" }
+      - { name: sales_unitsOrdered, type: FLOAT64, description: "Total units ordered" }
+      - { name: sales_unitsOrderedB2B, type: FLOAT64, description: "B2B units ordered" }
+      - { name: sales_totalOrderItems, type: FLOAT64, description: "Total order line items" }
+      - { name: sales_averageSellingPrice_amount, type: FLOAT64, description: "Average selling price per unit (do NOT sum)" }
+      - { name: sales_averageUnitsPerOrderItem, type: FLOAT64, description: "Average units per order item (do NOT sum)" }
+      - { name: sales_unitsRefunded, type: FLOAT64, description: "Units refunded" }
+      - { name: sales_refundRate, type: FLOAT64, description: "Refund rate % (do NOT sum)" }
+      - { name: sales_shippedProductSales_amount, type: FLOAT64, description: "Revenue from shipped orders" }
+      - { name: sales_unitsShipped, type: FLOAT64, description: "Units shipped" }
+      - { name: sales_ordersShipped, type: FLOAT64, description: "Distinct orders shipped" }
+      - { name: traffic_pageViews, type: FLOAT64, description: "Total detail page views (browser + app)" }
+      - { name: traffic_sessions, type: FLOAT64, description: "Total unique visitor sessions" }
+      - { name: traffic_buyBoxPercentage, type: FLOAT64, description: "Buy Box win rate % (do NOT sum)" }
+      - { name: traffic_orderItemSessionPercentage, type: FLOAT64, description: "Conversion rate % = order items / sessions (do NOT sum)" }
+      - { name: traffic_unitSessionPercentage, type: FLOAT64, description: "Unit session % = units / sessions (do NOT sum)" }
+      - { name: traffic_feedbackReceived, type: FLOAT64, description: "Seller feedback ratings received" }
+      - { name: traffic_negativeFeedbackReceived, type: FLOAT64, description: "Negative seller feedback" }
+      - { name: client_id, type: STRING }
+      - { name: loaded_at, type: STRING }
+
+  pma_sales_traffic_by_asin:
+    description: "Daily per-ASIN sales metrics from Seller Central"
+    grain: "One row per ASIN per day."
+    is_raw_table: true
+    extra_context: "Per-product sales data. Joinable with v_ads_asin_daily on asin+date for combined organic+ads view. These are organic SC sales — the same product may appear in ads data with different (attributed) sales numbers."
+    use_for: "product-level revenue and units, identifying top/bottom sellers, return analysis per product, net revenue after refunds, average selling price trends"
+    typical_questions:
+      - "Which products sold the most units last week?"
+      - "What's the return rate per product?"
+      - "Show me net sales by ASIN for the last 7 days"
+      - "Which ASINs have declining sales?"
+    columns:
+      - { name: date, type: STRING, description: "Business date YYYY-MM-DD" }
+      - { name: asin, type: STRING, description: "Child ASIN — JOIN key with v_ads_asin_daily and rf_products" }
+      - { name: parent_asin, type: STRING, description: "Parent ASIN (product family)" }
+      - { name: units_sold, type: FLOAT64, description: "Gross units ordered" }
+      - { name: sales, type: FLOAT64, description: "Gross ordered revenue" }
+      - { name: net_sales, type: FLOAT64, description: "Revenue after returns (sales - refunds)" }
+      - { name: units_returned, type: FLOAT64, description: "Units refunded" }
+      - { name: refunded_product_sales, type: FLOAT64, description: "Refund amount" }
+      - { name: average_sales_price, type: FLOAT64, description: "Average price per unit (do NOT sum)" }
+      - { name: net_units_sold, type: FLOAT64, description: "Units after returns (units_sold - units_returned)" }
+      - { name: net_proceeds_per_unit, type: FLOAT64, description: "Net revenue per unit (do NOT sum)" }
+      - { name: client_id, type: STRING }
+      - { name: loaded_at, type: STRING }
+
+  pma_orders:
+    description: "Individual order line items from Seller Central"
+    grain: "One row per item per order. Multiple rows per order if customer bought multiple products."
+    is_raw_table: true
+    extra_context: "Most granular sales data — individual transactions with shipping address, fulfillment channel, and order status. order_total is per-order (same across line items) — do NOT sum it across rows of the same amazon_order_id."
+    use_for: "order-level analysis, fulfillment breakdown (FBA vs FBM), geographic demand by postal code/city, cancellation analysis, shipping fee analysis, B2B order identification"
+    typical_questions:
+      - "How many orders were cancelled last week?"
+      - "What percentage of orders are FBA vs merchant-fulfilled?"
+      - "Show me orders by shipping city"
+      - "What's the average order value?"
+      - "How many B2B orders did we get?"
+    important: "order_total and number_of_items are per-order, not per-line-item. When aggregating, use COUNT(DISTINCT amazon_order_id) for order counts, not COUNT(*)."
+    columns:
+      - { name: date, type: STRING, description: "Order purchase date YYYY-MM-DD" }
+      - { name: amazon_order_id, type: STRING, description: "Unique order ID — group by this for per-order analysis" }
+      - { name: asin, type: STRING, description: "Product ASIN — JOIN key with other tables" }
+      - { name: parent_asin, type: STRING, description: "Parent ASIN (product family)" }
+      - { name: sku, type: STRING, description: "Seller's SKU" }
+      - { name: product_name, type: STRING, description: "Product title" }
+      - { name: quantity, type: FLOAT64, description: "Units in this line item" }
+      - { name: item_price, type: FLOAT64, description: "Line item subtotal (qty × unit price)" }
+      - { name: item_tax, type: FLOAT64, description: "Tax on item price" }
+      - { name: currency, type: STRING, description: "Currency code (EUR, USD)" }
+      - { name: order_total, type: FLOAT64, description: "Full order total (same across line items of one order)" }
+      - { name: order_status, type: STRING, description: "Pending, Unshipped, Shipped, Cancelled" }
+      - { name: item_status, type: STRING, description: "Per-item status" }
+      - { name: fulfillment_channel, type: STRING, description: "Amazon (FBA) or Merchant (FBM)" }
+      - { name: ship_city, type: STRING, description: "Shipping destination city" }
+      - { name: ship_state, type: STRING, description: "Shipping destination state/region" }
+      - { name: ship_postal_code, type: STRING, description: "Shipping postal code" }
+      - { name: ship_country, type: STRING, description: "Shipping country code (DE, AT, etc.)" }
+      - { name: is_business_order, type: STRING, description: "true/false — Amazon Business order" }
+      - { name: client_id, type: STRING }
+      - { name: loaded_at, type: STRING }
+
+  pma_inventory:
+    description: "Current merchant inventory listings snapshot from Seller Central"
+    grain: "One row per SKU. Point-in-time snapshot — shows current state, not history."
+    is_raw_table: true
+    extra_context: "Snapshot table — date is the collection date, not listing creation. Always filter to the latest date for current state. Includes both FBA and FBM listings."
+    use_for: "current inventory levels, listing catalog overview, price monitoring, identifying listings by fulfillment channel"
+    typical_questions:
+      - "How many products do we have listed?"
+      - "Which products are out of stock?"
+      - "Show me inventory quantities by product"
+    important: "This is a snapshot — always filter to the latest date: WHERE date = (SELECT MAX(date) FROM pma_inventory WHERE client_id = '...')"
+    columns:
+      - { name: date, type: STRING, description: "Snapshot collection date YYYY-MM-DD" }
+      - { name: asin, type: STRING, description: "Product ASIN" }
+      - { name: seller_sku, type: STRING, description: "Seller's SKU" }
+      - { name: item_name, type: STRING, description: "Product listing title" }
+      - { name: price, type: STRING, description: "Current listing price (as text)" }
+      - { name: inventory_quantity, type: FLOAT64, description: "Available inventory units" }
+      - { name: pending_quantity, type: FLOAT64, description: "Pending/reserved units" }
+      - { name: item_condition, type: STRING, description: "New, Refurbished, Used*" }
+      - { name: fulfillment_channel, type: STRING, description: "DEFAULT (FBM) or AMAZON_NA (FBA)" }
+      - { name: open_date, type: STRING, description: "Listing creation date" }
+      - { name: client_id, type: STRING }
+      - { name: loaded_at, type: STRING }
+
+  pma_inventory_fba:
+    description: "FBA inventory levels across Amazon fulfillment centers"
+    grain: "One row per SKU. Point-in-time snapshot of FBA stock."
+    is_raw_table: true
+    extra_context: "Detailed FBA inventory breakdown — fulfillable, inbound, reserved, unsellable quantities. Critical for stock monitoring and replenishment. afn_fulfillable_quantity is the key metric — when it hits zero, you're out of stock."
+    use_for: "FBA stock levels, replenishment planning, identifying low-stock products, inbound shipment tracking, unsellable inventory management"
+    typical_questions:
+      - "Which products are running low on FBA stock?"
+      - "How much inventory is inbound to Amazon?"
+      - "Show me products with unsellable units"
+      - "What's our total FBA inventory value?"
+    important: "This is a snapshot — always filter to the latest date. afn_fulfillable_quantity = sellable stock. When this reaches zero, the product is out of stock on Amazon."
+    columns:
+      - { name: date, type: STRING, description: "Snapshot collection date YYYY-MM-DD" }
+      - { name: asin, type: STRING, description: "Product ASIN — JOIN key with other tables" }
+      - { name: sku, type: STRING, description: "Seller's SKU" }
+      - { name: fnsku, type: STRING, description: "Amazon's internal FBA identifier" }
+      - { name: product_name, type: STRING, description: "Product title" }
+      - { name: condition, type: STRING, description: "Item condition (usually New)" }
+      - { name: your_price, type: FLOAT64, description: "Current listing price" }
+      - { name: afn_fulfillable_quantity, type: FLOAT64, description: "Units ready to sell and ship (KEY METRIC)" }
+      - { name: afn_total_quantity, type: FLOAT64, description: "Total FBA units (all statuses)" }
+      - { name: afn_unsellable_quantity, type: FLOAT64, description: "Damaged/defective units" }
+      - { name: afn_reserved_quantity, type: FLOAT64, description: "Reserved for pending orders" }
+      - { name: afn_inbound_working_quantity, type: FLOAT64, description: "Inbound shipments being prepared" }
+      - { name: afn_inbound_shipped_quantity, type: FLOAT64, description: "In transit to Amazon" }
+      - { name: afn_inbound_receiving_quantity, type: FLOAT64, description: "Being received at warehouse" }
+      - { name: TotalSupplyQuantity, type: FLOAT64, description: "Total supply (fulfillable + inbound)" }
+      - { name: client_id, type: STRING }
+      - { name: loaded_at, type: STRING }
+
+
 # ── JOIN Relationships ──────────────────────────────────────────────────
 
 join_relationships:
@@ -207,6 +366,18 @@ join_relationships:
   - view_a: v_ads_campaign_daily
     view_b: rf_products
     keys: ["(via v_ads_asin_daily as bridge: campaign_name + asin)"]
+  - view_a: v_ads_asin_daily
+    view_b: pma_sales_traffic_by_asin
+    keys: [asin, date]
+  - view_a: pma_sales_traffic_by_asin
+    view_b: rf_products
+    keys: [asin]
+  - view_a: pma_orders
+    view_b: pma_inventory_fba
+    keys: [asin]
+  - view_a: pma_orders
+    view_b: pma_sales_traffic_by_asin
+    keys: [asin, date]
 
 join_notes:
   - "v_ads_asin_daily does NOT have campaign_id — use campaign_name to join with campaign data."
@@ -214,6 +385,9 @@ join_notes:
   - "v_ads_summary_daily is an aggregation of campaign_daily. Do not JOIN them — query campaign_daily directly instead."
   - "rf_products is a raw table, NOT a view. Always deduplicate to the latest snapshot per ASIN using: ROW_NUMBER() OVER (PARTITION BY asin ORDER BY snapshot_date DESC) = 1."
   - "rf_products uses the fully qualified name `example-gcp-project.{dataset}.rf_products` (same dataset as the views)."
+  - "pma_* tables are raw tables (not views). Use the fully qualified name `example-gcp-project.{dataset}.pma_*` (same dataset as the views)."
+  - "pma_inventory and pma_inventory_fba are SNAPSHOT tables. Always filter to the latest date."
+  - "pma_orders.order_total is per-order, not per-line-item. Use COUNT(DISTINCT amazon_order_id) for order counts."
   - "All views share client_id and date. Always include both in JOIN conditions when applicable."
 
 
@@ -306,6 +480,8 @@ query_examples:
 ai_warnings:
   - "All monetary values (cost, sales, budget) are in EUR (except US marketplace clients like client_06 which use USD)"
   - "ACoS, CTR, and CVR are stored as percentages (e.g., 25.5 means 25.5%)"
+  - "CRITICAL: pma_sales_traffic_by_date sales are ORGANIC Seller Central totals (all sources). v_ads_* sales are ATTRIBUTED to ad clicks only. Do NOT compare them directly — SC sales will always be higher than Ads sales. To calculate organic sales: SC total sales - Ads attributed sales."
+  - "pma_sales_traffic_by_date averages and percentages (buyBoxPercentage, unitSessionPercentage, refundRate, averageSellingPrice) are daily pre-computed values. Do NOT SUM them across days — recalculate from underlying totals (e.g., weekly conversion = SUM(totalOrderItems)/SUM(sessions)*100)."
   - "ROAS is a ratio (e.g., 4.0 means 4x return)"
   - "Always use LIMIT to avoid returning too many rows"
   - "Use SAFE_DIVIDE for calculations to avoid division by zero"
