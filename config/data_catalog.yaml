@@ -229,29 +229,36 @@ views:
       - { name: client_id, type: STRING }
       - { name: loaded_at, type: STRING }
 
-  pma_sales_traffic_by_asin:
-    description: "Daily per-ASIN sales metrics from Seller Central"
-    grain: "One row per ASIN per day."
+  pma_sales_traffic_by_child_asin:
+    description: "Daily per-child-ASIN sales and traffic from Seller Central (includes B2B breakdowns)"
+    grain: "One row per child ASIN per day."
     is_raw_table: true
-    extra_context: "Per-product sales data. Joinable with v_ads_asin_daily on asin+date for combined organic+ads view. These are organic SC sales — the same product may appear in ads data with different (attributed) sales numbers."
-    use_for: "product-level revenue and units, identifying top/bottom sellers, return analysis per product, net revenue after refunds, average selling price trends"
+    extra_context: "Child-ASIN level with B2B breakdowns and refund details not in the by_asin report. Use for B2B analysis and refund tracking."
+    use_for: "B2B sales breakdown, refund rate analysis per child ASIN, shipped vs ordered comparison, detailed traffic by device type with B2B split"
     typical_questions:
-      - "Which products sold the most units last week?"
-      - "What's the return rate per product?"
-      - "Show me net sales by ASIN for the last 7 days"
-      - "Which ASINs have declining sales?"
+      - "What percentage of sales are B2B?"
+      - "Which child ASINs have the highest refund rate?"
+      - "Show me B2B vs total units ordered"
+      - "Compare shipped vs ordered units per ASIN"
     columns:
       - { name: date, type: STRING, description: "Business date YYYY-MM-DD" }
-      - { name: asin, type: STRING, description: "Child ASIN — JOIN key with v_ads_asin_daily and rf_products" }
+      - { name: asin, type: STRING, description: "Child ASIN — JOIN key with other tables" }
       - { name: parent_asin, type: STRING, description: "Parent ASIN (product family)" }
-      - { name: units_sold, type: FLOAT64, description: "Gross units ordered" }
-      - { name: sales, type: FLOAT64, description: "Gross ordered revenue" }
-      - { name: net_sales, type: FLOAT64, description: "Revenue after returns (sales - refunds)" }
-      - { name: units_returned, type: FLOAT64, description: "Units refunded" }
-      - { name: refunded_product_sales, type: FLOAT64, description: "Refund amount" }
-      - { name: average_sales_price, type: FLOAT64, description: "Average price per unit (do NOT sum)" }
-      - { name: net_units_sold, type: FLOAT64, description: "Units after returns (units_sold - units_returned)" }
-      - { name: net_proceeds_per_unit, type: FLOAT64, description: "Net revenue per unit (do NOT sum)" }
+      - { name: dataFreshness, type: STRING, description: "When Amazon last refreshed this data" }
+      - { name: sales_unitsOrdered, type: FLOAT64, description: "Units ordered (all channels)" }
+      - { name: sales_unitsOrderedB2B, type: FLOAT64, description: "Units ordered (B2B only)" }
+      - { name: sales_orderedProductSales_amount, type: FLOAT64, description: "Revenue (all channels)" }
+      - { name: sales_unitsShipped, type: FLOAT64, description: "Units shipped" }
+      - { name: sales_shippedProductSales_amount, type: FLOAT64, description: "Shipped revenue" }
+      - { name: sales_unitsRefunded, type: FLOAT64, description: "Units refunded" }
+      - { name: sales_refundRate, type: FLOAT64, description: "Refund rate (do NOT sum)" }
+      - { name: refund_rate, type: FLOAT64, description: "Refund rate all channels (do NOT sum)" }
+      - { name: refund_rateB2B, type: FLOAT64, description: "Refund rate B2B (do NOT sum)" }
+      - { name: unit_session_percentage, type: FLOAT64, description: "Conversion rate (do NOT sum)" }
+      - { name: traffic_sessions, type: FLOAT64, description: "Total sessions" }
+      - { name: traffic_sessionsB2B, type: FLOAT64, description: "B2B sessions" }
+      - { name: traffic_pageViews, type: FLOAT64, description: "Total page views" }
+      - { name: traffic_pageViewsB2B, type: FLOAT64, description: "B2B page views" }
       - { name: client_id, type: STRING }
       - { name: loaded_at, type: STRING }
 
@@ -367,16 +374,16 @@ join_relationships:
     view_b: rf_products
     keys: ["(via v_ads_asin_daily as bridge: campaign_name + asin)"]
   - view_a: v_ads_asin_daily
-    view_b: pma_sales_traffic_by_asin
+    view_b: pma_sales_traffic_by_child_asin
     keys: [asin, date]
-  - view_a: pma_sales_traffic_by_asin
+  - view_a: pma_sales_traffic_by_child_asin
     view_b: rf_products
     keys: [asin]
   - view_a: pma_orders
     view_b: pma_inventory_fba
     keys: [asin]
   - view_a: pma_orders
-    view_b: pma_sales_traffic_by_asin
+    view_b: pma_sales_traffic_by_child_asin
     keys: [asin, date]
 
 join_notes:
