@@ -15,7 +15,7 @@ _dashboard_dir = str(Path(__file__).resolve().parent.parent)
 if _dashboard_dir not in sys.path:
     sys.path.insert(0, _dashboard_dir)
 
-from chat_schema import build_schema_context, SQL_GENERATION_PROMPT, INTERPRETATION_PROMPT
+from chat_schema import build_client_schema, SQL_GENERATION_PROMPT, INTERPRETATION_PROMPT
 from chat_utils import get_anthropic_client, validate_sql
 from sidebar import (
     GCP_PROJECT,
@@ -89,10 +89,9 @@ def get_cached_result(session: dict, sql: str) -> pd.DataFrame | None:
 # ---------------------------------------------------------------------------
 
 
-def generate_sql(client, question: str, dataset: str, start_date: date, end_date: date,
-                  all_datasets: list[str] | None = None) -> str:
+def generate_sql(client, question: str, dataset: str, start_date: date, end_date: date) -> str:
     """Use Claude to generate a SQL query from natural language."""
-    schema = build_schema_context(all_datasets or [dataset])
+    schema = build_client_schema(GCP_PROJECT, dataset)
     prompt = SQL_GENERATION_PROMPT.format(
         schema=schema,
         dataset=dataset,
@@ -306,7 +305,6 @@ def _render_chat_tab(session: dict, dataset: str, clients: dict):
                         sql = generate_sql(
                             anthropic_client, question,
                             proc["dataset"], proc["start_date"], proc["end_date"],
-                            all_datasets=list(clients.keys()),
                         )
 
                     is_valid, error_msg = validate_sql(sql)

@@ -1,13 +1,14 @@
 """BigQuery schema context for Claude AI chat integration.
 
-Builds the schema context dynamically from config/data_catalog.yaml
-instead of hardcoding it. Falls back to a static string if the YAML
-is not available (e.g., during migration).
+Builds the schema context dynamically from config/data_catalog.yaml,
+filtered to only the tables/views that exist for the selected client.
+Falls back to a static string if the YAML is not available.
 """
 
 import logging
 from pathlib import Path
 
+import streamlit as st
 import yaml
 
 from adp.config import _resolve_config_dir
@@ -82,8 +83,8 @@ def _format_view(name: str, view: dict) -> str:
     return "\n".join(parts)
 
 
-def _format_joins(catalog: dict) -> str:
-    """Format JOIN relationships section."""
+def _format_joins_filtered(catalog: dict, existing: frozenset[str]) -> str:
+    """Format JOIN relationships, filtered to tables that exist for this client."""
     parts = [
         "## View Relationships (for JOINs)",
         "",
@@ -94,25 +95,47 @@ def _format_joins(catalog: dict) -> str:
         "|--------|--------|-----------|",
     ]
 
+    has_joins = False
     for rel in catalog.get("join_relationships", []):
-        keys = " + ".join(rel["keys"])
-        parts.append(f"| {rel['view_a']} | {rel['view_b']} | {keys} |")
+        if rel["view_a"] in existing and rel["view_b"] in existing:
+            keys = " + ".join(rel["keys"])
+            parts.append(f"| {rel['view_a']} | {rel['view_b']} | {keys} |")
+            has_joins = True
+
+    if not has_joins:
+        return ""
 
     parts.append("")
     parts.append("Notes:")
     for note in catalog.get("join_notes", []):
-        parts.append(f"- {note}")
+        # Only include notes that reference tables the client has
+        # Check if any existing table name appears in the note
+        if any(t in note for t in existing):
+            parts.append(f"- {note}")
 
     return "\n".join(parts)
 
 
-def _format_examples(catalog: dict) -> str:
-    """Format query examples section."""
+def _format_examples_filtered(catalog: dict, dataset: str, existing: frozenset[str]) -> str:
+    """Format query examples, rewritten for this client's dataset."""
     parts = ["## Query Patterns"]
 
     for ex in catalog.get("query_examples", []):
+        sql = ex["sql"].strip()
+        # Check if all tables referenced in the example exist for this client
+        # Skip examples that reference tables the client doesn't have
+        skip = False
+        for view_name in catalog.get("views", {}):
+            if view_name in sql and view_name not in existing:
+                skip = True
+                break
+        if skip:
+            continue
+
+        # Rewrite dataset references to use the selected client's dataset
+        sql = sql.replace("adp_client_07", dataset)
         parts.append(f"\n### {ex['name']}")
-        parts.append(f"```sql\n{ex['sql'].strip()}\n```")
+        parts.append(f"```sql\n{sql}\n```")
 
     return "\n".join(parts)
 
@@ -125,44 +148,66 @@ def _format_warnings(catalog: dict) -> str:
     return "\n".join(parts)
 
 
-def build_schema_context(datasets: list[str]) -> str:
-    """Build the schema context string from data_catalog.yaml.
+@st.cache_data(ttl=300)
+def _discover_client_tables(gcp_project: str, dataset: str) -> frozenset[str]:
+    """Check which catalog tables/views actually exist in this BQ dataset."""
+    from sidebar import get_bq_client
+    bq = get_bq_client()
+    try:
+        return frozenset(t.table_id for t in bq.list_tables(f"{gcp_project}.{dataset}"))
+    except Exception:
+        return frozenset()
+
+
+def build_client_schema(gcp_project: str, dataset: str) -> str:
+    """Build a schema context containing only views/tables that exist for this client.
 
     Parameters
     ----------
-    datasets:
-        List of client dataset names (e.g., ["adp_client_07", "adp_client_01"]).
+    gcp_project:
+        GCP project ID (e.g., "example-gcp-project").
+    dataset:
+        Client dataset name (e.g., "adp_client_07").
     """
     catalog = load_data_catalog()
     if catalog is None:
         logger.warning("data_catalog.yaml not found, using fallback")
         return _FALLBACK_SCHEMA_CONTEXT
 
+    existing = _discover_client_tables(gcp_project, dataset)
+
+    # Filter views to those that exist in this dataset
+    client_views = {
+        name: view for name, view in catalog.get("views", {}).items()
+        if name in existing
+    }
+
+    if not client_views:
+        logger.warning("No catalog views found in %s, using full catalog", dataset)
+        client_views = catalog.get("views", {})
+
     parts = []
 
-    # Datasets section
-    parts.append("## Available Datasets")
-    parts.append("Each client has their own dataset prefixed with `adp_`:")
-    for ds in sorted(datasets):
-        parts.append(f"- {ds}")
+    # Dataset section (single client)
+    parts.append(f"## Dataset: `{gcp_project}.{dataset}`")
     parts.append("")
 
-    # Views section
-    parts.append("## Views (recommended - deduplicated with pre-calculated KPIs)")
+    # Views section — only those that exist
+    parts.append("## Available Tables and Views")
     parts.append("")
     parts.append("All views contain a `client_id` (STRING) column that identifies the client.")
     parts.append("")
 
-    for name, view in catalog.get("views", {}).items():
+    for name, view in client_views.items():
         parts.append(_format_view(name, view))
         parts.append("")
 
-    # JOINs
-    parts.append(_format_joins(catalog))
+    # JOINs — only where both sides exist
+    parts.append(_format_joins_filtered(catalog, existing))
     parts.append("")
 
-    # Examples
-    parts.append(_format_examples(catalog))
+    # Examples — rewritten for this dataset
+    parts.append(_format_examples_filtered(catalog, dataset, existing))
     parts.append("")
 
     # Warnings
@@ -175,27 +220,28 @@ def build_schema_context(datasets: list[str]) -> str:
 # Prompt templates (these are prompt engineering logic, not data)
 # ---------------------------------------------------------------------------
 
-SQL_GENERATION_PROMPT = """You are a SQL expert for Amazon advertising data stored in BigQuery.
+SQL_GENERATION_PROMPT = """You are a SQL expert for Amazon data stored in BigQuery.
 Given a user question, generate a SQL query to answer it.
+
+You are querying dataset `{dataset}`. Only the tables listed below exist for this client.
 
 {schema}
 
 ## Rules
-1. Use fully qualified table names: `example-gcp-project.{{dataset}}.{{view}}`
+1. Use fully qualified table names: `example-gcp-project.{dataset}.{{table}}`
 2. Always include LIMIT (maximum 1000 rows)
-3. Use the views (v_ads_*) for ads data. The only raw table you may query directly is `rf_products` (for product names, brands, etc.)
+3. Prefer views (v_ads_*) over raw tables for ads data
 4. For date ranges, use BETWEEN with 'YYYY-MM-DD' format
 5. Use SAFE_DIVIDE for any division operations
 6. Return ONLY the SQL query, no explanations or markdown code blocks
 7. For aggregations, use appropriate GROUP BY clauses
 8. Round numeric results to 2 decimal places where appropriate
-9. UNION ALL requires all SELECT statements to have identical columns. NEVER combine different views in a UNION ALL. Only UNION ALL the same view across different datasets.
-10. All views have a `client_id` column. Prefer using it for cross-client queries within a single view instead of UNION ALL across datasets.
-11. For search term analysis or keyword questions, use `v_ads_searchterm_daily`.
-12. JOINs across views are allowed and encouraged when the question requires data from multiple views. Always JOIN on `date` plus the appropriate key column (see View Relationships table). Use table aliases (e.g., `c` for campaign, `a` for ASIN, `s` for searchterm). Be careful: v_ads_asin_daily has campaign_name but NOT campaign_id.
+9. NEVER combine different tables/views in a UNION ALL — they have different columns
+10. For search term analysis or keyword questions, use `v_ads_searchterm_daily`
+11. JOINs across tables are allowed when the question requires it. Always JOIN on `date` plus the appropriate key column (see View Relationships). Use table aliases.
+12. If the user asks about data that is not available in the listed tables, say so instead of guessing.
 
 ## Current Context
-- Selected client dataset: {dataset}
 - Date range: {start_date} to {end_date}
 
 User question: {question}
