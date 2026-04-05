@@ -102,9 +102,15 @@ def generate_sql(client, question: str, dataset: str, start_date: date, end_date
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=2048,
+        max_tokens=8192,
         messages=[{"role": "user", "content": prompt}],
     )
+
+    if response.stop_reason == "max_tokens":
+        raise ValueError(
+            "The generated SQL was too long and got truncated. "
+            "Try asking a simpler question or breaking it into smaller parts."
+        )
 
     sql = response.content[0].text.strip()
 
