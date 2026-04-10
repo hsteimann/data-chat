@@ -245,7 +245,7 @@ def _cancel_processing(session_id: str) -> None:
     st.session_state.pop(key, None)
 
 
-def _render_chat_tab(session: dict, dataset: str, clients: dict):
+def _render_chat_tab(session: dict, dataset: str):
     """Render the chat interface for one session."""
     session_id = session["id"]
     proc_key = _proc_key(session_id)
@@ -398,15 +398,10 @@ def _render_chat_tab(session: dict, dataset: str, clients: dict):
     ):
         session["messages"].append({"role": "user", "content": prompt})
 
-        if dataset == "all":
-            query_dataset = list(clients.keys())[0]
-        else:
-            query_dataset = dataset
-
         st.session_state[proc_key] = {
             "phase": "generate_sql",
             "question": prompt,
-            "dataset": query_dataset,
+            "dataset": dataset,
             "start_date": start_date,
             "end_date": end_date,
             "sql": None,
@@ -422,24 +417,21 @@ def _render_chat_tab(session: dict, dataset: str, clients: dict):
 st.title("Data Chat")
 st.caption("Ask questions about your Amazon advertising data using natural language.")
 
+# Read workspace client from sidebar
+selected_client = st.session_state.get("workspace_client")
 clients = get_ads_clients()
-if not clients:
-    st.warning("No client datasets found.")
+
+if not selected_client or selected_client not in clients:
+    client_label = (
+        client_label_from_dataset(selected_client)
+        if selected_client
+        else "the selected client"
+    )
+    st.info(f"No Ads data available for **{client_label}**. Select a different client in the sidebar.")
     st.stop()
 
-client_options = {"all": "All Clients", **clients}
-
-# --- Top bar: Client selector + New Chat button ---
-col_client, col_spacer, col_new = st.columns([3, 5, 2])
-
-with col_client:
-    selected_client = st.selectbox(
-        "Client",
-        options=list(client_options.keys()),
-        format_func=lambda k: client_options[k],
-        key="dc_client",
-    )
-
+# --- Top bar: New Chat button ---
+_, col_new = st.columns([8, 2])
 with col_new:
     st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
     new_chat_clicked = st.button("+ New Chat", key="dc_new_chat_btn")
@@ -477,4 +469,4 @@ tabs = st.tabs(tab_labels)
 # --- Render each tab ---
 for tab, session in zip(tabs, sessions):
     with tab:
-        _render_chat_tab(session, selected_client, clients)
+        _render_chat_tab(session, selected_client)
