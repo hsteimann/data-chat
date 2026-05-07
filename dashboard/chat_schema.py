@@ -12,6 +12,7 @@ import streamlit as st
 import yaml
 
 from adp.config import _resolve_config_dir
+from adp.services.registry import RegistryService
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,47 @@ def _format_warnings(catalog: dict) -> str:
 
 
 @st.cache_data(ttl=300)
+def _build_kpi_section() -> str:
+    """Format KPI definitions from the registry as a markdown block for the prompt."""
+    try:
+        reg = RegistryService(load_schemas=False)
+    except Exception:
+        return ""
+
+    kpis = reg.registry.kpis
+    if not kpis:
+        return ""
+
+    lines = [
+        "## KPI Definitions",
+        "Use these formulas when calculating or interpreting KPIs.",
+        "For aggregated queries always recalculate ratio KPIs from summed components — never average them.",
+        "",
+    ]
+
+    direction_label = {"lower_is_better": "lower is better", "higher_is_better": "higher is better"}
+
+    for name, k in kpis.items():
+        parts = [f"**{name.upper()}**"]
+        parts.append(f"= {k.formula}")
+        if k.unit:
+            parts.append(f"[{k.unit}]")
+        if k.direction:
+            parts.append(f"— {direction_label.get(k.direction, k.direction)}")
+        if k.typical_range:
+            lo, hi = k.typical_range[0], k.typical_range[1]
+            parts.append(f"(typical {lo}–{hi})")
+        line = " ".join(parts)
+        if k.interpretation:
+            line += f". {k.interpretation[:120].rstrip()}"
+        if k.warning:
+            line += f" ⚠️ {k.warning[:120].rstrip()}"
+        lines.append(f"- {line}")
+
+    return "\n".join(lines)
+
+
+@st.cache_data(ttl=300)
 def _discover_client_tables(gcp_project: str, dataset: str) -> frozenset[str]:
     """Check which catalog tables/views actually exist in this BQ dataset."""
     from sidebar import get_bq_client
@@ -212,6 +254,12 @@ def build_client_schema(gcp_project: str, dataset: str) -> str:
 
     # Warnings
     parts.append(_format_warnings(catalog))
+
+    # KPI definitions from registry
+    kpi_section = _build_kpi_section()
+    if kpi_section:
+        parts.append("")
+        parts.append(kpi_section)
 
     return "\n".join(parts)
 
