@@ -12,20 +12,62 @@ views:
       - "What's our overall ACoS trend?"
       - "Compare this week vs last week."
     columns:
-      - { name: date, type: DATE }
-      - { name: active_campaigns, type: INT64, description: "Number of active campaigns that day" }
-      - { name: impressions, type: INT64 }
-      - { name: clicks, type: INT64 }
-      - { name: cost, type: FLOAT64 }
-      - { name: purchases, type: INT64 }
-      - { name: sales, type: FLOAT64 }
-      - { name: units_sold, type: INT64 }
-      - { name: acos, type: FLOAT64, description: percentage }
-      - { name: roas, type: FLOAT64 }
-      - { name: ctr, type: FLOAT64, description: percentage }
-      - { name: cpc, type: FLOAT64 }
-      - { name: cvr, type: FLOAT64, description: percentage }
-      - { name: client_id, type: STRING }
+      - name: date
+        type: DATE
+        description: "Business date — the day these metrics apply to"
+        definition: "DATE in YYYY-MM-DD (Marktplatz-Timezone). Für Datumsfilter: WHERE date BETWEEN '2026-01-01' AND '2026-01-31'. Daten können 48–72h nach dem Datum noch nachjustiert werden."
+      - name: active_campaigns
+        type: INT64
+        description: "Number of distinct campaigns with activity on this day"
+        definition: "COUNT(DISTINCT campaign_id) aus v_ads_campaign_daily. Zeigt wie viele Kampagnen an diesem Tag Impressions, Klicks oder Spend hatten."
+      - name: impressions
+        type: INT64
+        description: "Number of times the ad was displayed"
+        definition: "Gezählt wenn eine Anzeige auf der Amazon-Suchergebnisseite oder Produktdetailseite gerendert wird. Addierbar via SUM(impressions) über Kampagnen/Tage. Wird für CTR benötigt."
+      - name: clicks
+        type: INT64
+        description: "Number of times a shopper clicked the ad"
+        definition: "Ein Klick wird gezählt wenn ein Shopper auf die Anzeige klickt. Addierbar. Wird für CTR, CPC, CVR verwendet — niemals CTR/CPC/CVR direkt summieren."
+      - name: cost
+        type: FLOAT64
+        description: "Total ad spend in account currency"
+        definition: "Gesamte CPC-Kosten für validierte Klicks. Addierbar via SUM(cost). Währung ist EUR für DE-Marktplatz, USD für US. Wird für ACoS, ROAS, CPC berechnet."
+      - name: purchases
+        type: INT64
+        description: "Attributed purchases within 1-day click window"
+        definition: "Bestellabschlüsse die einem Ad-Klick innerhalb von 24h zugeordnet werden. 1-Day-Attribution — NICHT vergleichbar mit SB-Purchases (14-Day). Addierbar via SUM."
+      - name: sales
+        type: FLOAT64
+        description: "Attributed sales revenue within 1-day click window, in account currency"
+        definition: "Umsatz aus Käufen die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar. SP-Attribution (1d) ≠ SB-Attribution (14d) — niemals beide in einer UNION aggregieren."
+      - name: units_sold
+        type: INT64
+        description: "Units sold attributed to ad clicks within 1-day window"
+        definition: "Anzahl einzelner Produkteinheiten die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar."
+      - name: acos
+        type: FLOAT64
+        description: "Advertising Cost of Sales = cost/sales × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, sales1d) * 100, 2). Beim Aggregieren IMMER neu berechnen: ROUND(SAFE_DIVIDE(SUM(cost), SUM(sales)) * 100, 2). Niemals SUM(acos)."
+      - name: roas
+        type: FLOAT64
+        description: "Return on Ad Spend = sales/cost [ratio]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(sales1d, cost), 2). Beim Aggregieren neu berechnen: ROUND(SAFE_DIVIDE(SUM(sales), SUM(cost)), 2). Niemals SUM(roas). v_ads_summary_daily hat korrekt aggregierten ROAS."
+      - name: ctr
+        type: FLOAT64
+        description: "Click-through rate = clicks/impressions × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(clicks, impressions) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(clicks), SUM(impressions)) * 100, 2). Niemals direkt summieren oder mitteln."
+      - name: cpc
+        type: FLOAT64
+        description: "Cost per click = cost/clicks [currency]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, clicks), 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(cost), SUM(clicks)), 2). Niemals direkt summieren."
+      - name: cvr
+        type: FLOAT64
+        description: "Conversion rate = purchases/clicks × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(purchases1d, clicks) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(purchases), SUM(clicks)) * 100, 2). Niemals direkt summieren."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
 
   v_ads_campaign_daily:
     description: "Campaign-level daily performance metrics"
@@ -37,24 +79,78 @@ views:
       - "Which campaign has the best ROAS?"
       - "How is budget distributed across campaigns?"
     columns:
-      - { name: date, type: DATE, description: "The reporting date" }
-      - { name: campaign_id, type: STRING, description: "Unique campaign identifier" }
-      - { name: campaign_name, type: STRING, description: "Human-readable campaign name" }
-      - { name: campaign_status, type: STRING, description: "e.g., ENABLED, PAUSED" }
-      - { name: budget, type: FLOAT64, description: "Daily budget in currency" }
-      - { name: currency, type: STRING, description: "Currency code (e.g., EUR)" }
-      - { name: impressions, type: INT64, description: "Number of ad impressions" }
-      - { name: clicks, type: INT64, description: "Number of ad clicks" }
-      - { name: cost, type: FLOAT64, description: "Total ad spend" }
-      - { name: purchases, type: INT64, description: "Number of attributed purchases" }
-      - { name: sales, type: FLOAT64, description: "Total attributed sales revenue" }
-      - { name: units_sold, type: INT64, description: "Number of units sold" }
-      - { name: acos, type: FLOAT64, description: "Advertising Cost of Sales (cost/sales * 100), as percentage" }
-      - { name: roas, type: FLOAT64, description: "Return on Ad Spend (sales/cost)" }
-      - { name: ctr, type: FLOAT64, description: "Click-through rate (clicks/impressions * 100), as percentage" }
-      - { name: cpc, type: FLOAT64, description: "Cost per click (cost/clicks)" }
-      - { name: cvr, type: FLOAT64, description: "Conversion rate (purchases/clicks * 100), as percentage" }
-      - { name: client_id, type: STRING }
+      - name: date
+        type: DATE
+        description: "The reporting date"
+        definition: "DATE in YYYY-MM-DD (Marktplatz-Timezone). Für Datumsfilter: WHERE date BETWEEN '2026-01-01' AND '2026-01-31'. Daten können 48–72h nach dem Datum noch nachjustiert werden."
+      - name: campaign_id
+        type: STRING
+        description: "Unique campaign identifier"
+        definition: "Numerischer Amazon-Campaign-ID als STRING. Stabiler JOIN-Key — wird niemals wiederverwendet. Nur innerhalb eines Advertising-Profils eindeutig."
+      - name: campaign_name
+        type: STRING
+        description: "Human-readable campaign name"
+        definition: "Frei wählbarer Name, kann jederzeit geändert werden. Für JOINs campaign_id bevorzugen — v_ads_asin_daily hat keine campaign_id, daher dort campaign_name als JOIN-Key."
+      - name: campaign_status
+        type: STRING
+        description: "Campaign lifecycle state: ENABLED or PAUSED"
+        definition: "ENABLED = aktiv und bereit Anzeigen auszuspielen. PAUSED = manuell pausiert. Budget- oder Datumsende-Stopps werden separat gesteuert."
+      - name: budget
+        type: FLOAT64
+        description: "Daily budget cap for the campaign in account currency"
+        definition: "Maximalbetrag pro Tag. Amazon kann bis zu 10% overdelivern und gleicht das über andere Tage aus. Der Wert ist aktueller Stand — nicht historisch."
+      - name: currency
+        type: STRING
+        description: "ISO 4217 currency code (e.g. EUR, USD)"
+        definition: "Gilt für alle Geldwerte in dieser Zeile (cost, sales, budget). DE-Marktplatz = EUR, US = USD."
+      - name: impressions
+        type: INT64
+        description: "Number of ad impressions"
+        definition: "Gezählt wenn eine Anzeige auf der Amazon-Suchergebnisseite oder Produktdetailseite gerendert wird. Addierbar via SUM(impressions) über Kampagnen/Tage. Wird für CTR benötigt."
+      - name: clicks
+        type: INT64
+        description: "Number of ad clicks"
+        definition: "Ein Klick wird gezählt wenn ein Shopper auf die Anzeige klickt. Addierbar. Wird für CTR, CPC, CVR verwendet — niemals CTR/CPC/CVR direkt summieren."
+      - name: cost
+        type: FLOAT64
+        description: "Total ad spend"
+        definition: "Gesamte CPC-Kosten für validierte Klicks. Addierbar via SUM(cost). Währung ist EUR für DE-Marktplatz, USD für US. Wird für ACoS, ROAS, CPC berechnet."
+      - name: purchases
+        type: INT64
+        description: "Number of attributed purchases"
+        definition: "Bestellabschlüsse die einem Ad-Klick innerhalb von 24h zugeordnet werden. 1-Day-Attribution — NICHT vergleichbar mit SB-Purchases (14-Day). Addierbar via SUM."
+      - name: sales
+        type: FLOAT64
+        description: "Total attributed sales revenue"
+        definition: "Umsatz aus Käufen die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar. SP-Attribution (1d) ≠ SB-Attribution (14d) — niemals beide in einer UNION aggregieren."
+      - name: units_sold
+        type: INT64
+        description: "Number of units sold"
+        definition: "Anzahl einzelner Produkteinheiten die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar."
+      - name: acos
+        type: FLOAT64
+        description: "Advertising Cost of Sales (cost/sales * 100), as percentage"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, sales1d) * 100, 2). Beim Aggregieren IMMER neu berechnen: ROUND(SAFE_DIVIDE(SUM(cost), SUM(sales)) * 100, 2). Niemals SUM(acos)."
+      - name: roas
+        type: FLOAT64
+        description: "Return on Ad Spend (sales/cost)"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(sales1d, cost), 2). Beim Aggregieren neu berechnen: ROUND(SAFE_DIVIDE(SUM(sales), SUM(cost)), 2). Niemals SUM(roas)."
+      - name: ctr
+        type: FLOAT64
+        description: "Click-through rate (clicks/impressions * 100), as percentage"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(clicks, impressions) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(clicks), SUM(impressions)) * 100, 2). Niemals direkt summieren oder mitteln."
+      - name: cpc
+        type: FLOAT64
+        description: "Cost per click (cost/clicks)"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, clicks), 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(cost), SUM(clicks)), 2). Niemals direkt summieren."
+      - name: cvr
+        type: FLOAT64
+        description: "Conversion rate (purchases/clicks * 100), as percentage"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(purchases1d, clicks) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(purchases), SUM(clicks)) * 100, 2). Niemals direkt summieren."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
 
   v_ads_adgroup_daily:
     description: "Ad group level daily performance"
@@ -66,21 +162,66 @@ views:
       - "Show me the top ad groups by sales"
       - "Which ad groups have high clicks but no conversions?"
     columns:
-      - { name: date, type: DATE }
-      - { name: adgroup_id, type: STRING }
-      - { name: adgroup_name, type: STRING }
-      - { name: impressions, type: INT64 }
-      - { name: clicks, type: INT64 }
-      - { name: cost, type: FLOAT64 }
-      - { name: purchases, type: INT64 }
-      - { name: sales, type: FLOAT64 }
-      - { name: units_sold, type: INT64 }
-      - { name: acos, type: FLOAT64, description: percentage }
-      - { name: roas, type: FLOAT64 }
-      - { name: ctr, type: FLOAT64, description: percentage }
-      - { name: cpc, type: FLOAT64 }
-      - { name: cvr, type: FLOAT64, description: percentage }
-      - { name: client_id, type: STRING }
+      - name: date
+        type: DATE
+        description: "Business date — the day these metrics apply to"
+        definition: "DATE in YYYY-MM-DD (Marktplatz-Timezone). Für Datumsfilter: WHERE date BETWEEN '2026-01-01' AND '2026-01-31'. Daten können 48–72h nach dem Datum noch nachjustiert werden."
+      - name: adgroup_id
+        type: STRING
+        description: "Unique ad group identifier"
+        definition: "Amazon Ad Group ID als STRING. Eindeutiger JOIN-Key für Ad Group Daten. v_ads_adgroup_daily hat keine campaign_id — JOIN mit searchterm über adgroup_id."
+      - name: adgroup_name
+        type: STRING
+        description: "Ad group display name"
+        definition: "Frei wählbarer Name der Ad Group. Für JOINs adgroup_id bevorzugen."
+      - name: impressions
+        type: INT64
+        description: "Number of times the ad was displayed"
+        definition: "Gezählt wenn eine Anzeige auf der Amazon-Suchergebnisseite oder Produktdetailseite gerendert wird. Addierbar via SUM(impressions) über Kampagnen/Tage. Wird für CTR benötigt."
+      - name: clicks
+        type: INT64
+        description: "Number of times a shopper clicked the ad"
+        definition: "Ein Klick wird gezählt wenn ein Shopper auf die Anzeige klickt. Addierbar. Wird für CTR, CPC, CVR verwendet — niemals CTR/CPC/CVR direkt summieren."
+      - name: cost
+        type: FLOAT64
+        description: "Total ad spend in account currency"
+        definition: "Gesamte CPC-Kosten für validierte Klicks. Addierbar via SUM(cost). Währung ist EUR für DE-Marktplatz, USD für US. Wird für ACoS, ROAS, CPC berechnet."
+      - name: purchases
+        type: INT64
+        description: "Attributed purchases within 1-day click window"
+        definition: "Bestellabschlüsse die einem Ad-Klick innerhalb von 24h zugeordnet werden. 1-Day-Attribution — NICHT vergleichbar mit SB-Purchases (14-Day). Addierbar via SUM."
+      - name: sales
+        type: FLOAT64
+        description: "Attributed sales revenue within 1-day click window, in account currency"
+        definition: "Umsatz aus Käufen die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar. SP-Attribution (1d) ≠ SB-Attribution (14d) — niemals beide in einer UNION aggregieren."
+      - name: units_sold
+        type: INT64
+        description: "Units sold attributed to ad clicks within 1-day window"
+        definition: "Anzahl einzelner Produkteinheiten die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar."
+      - name: acos
+        type: FLOAT64
+        description: "Advertising Cost of Sales = cost/sales × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, sales1d) * 100, 2). Beim Aggregieren IMMER neu berechnen: ROUND(SAFE_DIVIDE(SUM(cost), SUM(sales)) * 100, 2). Niemals SUM(acos)."
+      - name: roas
+        type: FLOAT64
+        description: "Return on Ad Spend = sales/cost [ratio]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(sales1d, cost), 2). Beim Aggregieren neu berechnen: ROUND(SAFE_DIVIDE(SUM(sales), SUM(cost)), 2). Niemals SUM(roas)."
+      - name: ctr
+        type: FLOAT64
+        description: "Click-through rate = clicks/impressions × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(clicks, impressions) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(clicks), SUM(impressions)) * 100, 2). Niemals direkt summieren oder mitteln."
+      - name: cpc
+        type: FLOAT64
+        description: "Cost per click = cost/clicks [currency]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, clicks), 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(cost), SUM(clicks)), 2). Niemals direkt summieren."
+      - name: cvr
+        type: FLOAT64
+        description: "Conversion rate = purchases/clicks × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(purchases1d, clicks) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(purchases), SUM(clicks)) * 100, 2). Niemals direkt summieren."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
 
   v_ads_asin_daily:
     description: "ASIN-level daily performance (product-level metrics)"
@@ -93,22 +234,70 @@ views:
       - "Which ASINs are getting clicks but no purchases?"
       - "What's the ad performance for ASIN B0xxxxx?"
     columns:
-      - { name: date, type: DATE }
-      - { name: asin, type: STRING, description: "Amazon Standard Identification Number" }
-      - { name: sku, type: STRING, description: "Stock Keeping Unit" }
-      - { name: campaign_name, type: STRING }
-      - { name: impressions, type: INT64 }
-      - { name: clicks, type: INT64 }
-      - { name: cost, type: FLOAT64 }
-      - { name: purchases, type: INT64 }
-      - { name: sales, type: FLOAT64 }
-      - { name: units_sold, type: INT64 }
-      - { name: acos, type: FLOAT64, description: percentage }
-      - { name: roas, type: FLOAT64 }
-      - { name: ctr, type: FLOAT64, description: percentage }
-      - { name: cpc, type: FLOAT64 }
-      - { name: cvr, type: FLOAT64, description: percentage }
-      - { name: client_id, type: STRING }
+      - name: date
+        type: DATE
+        description: "Business date — the day these metrics apply to"
+        definition: "DATE in YYYY-MM-DD (Marktplatz-Timezone). Für Datumsfilter: WHERE date BETWEEN '2026-01-01' AND '2026-01-31'. Daten können 48–72h nach dem Datum noch nachjustiert werden."
+      - name: asin
+        type: STRING
+        description: "Amazon Standard Identification Number — product identifier"
+        definition: "10-stelliger alphanumerischer Amazon-Produktidentifier. JOIN-Key zwischen v_ads_asin_daily und rf_products. Unique per Variante (Child ASIN)."
+      - name: sku
+        type: STRING
+        description: "Seller's Stock Keeping Unit"
+        definition: "Händler-interner Produktcode, vom Seller selbst vergeben. Kann sich ändern. Für Produktanalysen asin bevorzugen."
+      - name: campaign_name
+        type: STRING
+        description: "Campaign display name as set in Amazon Ads console"
+        definition: "Frei wählbarer Name, kann jederzeit geändert werden. v_ads_asin_daily hat keine campaign_id — campaign_name ist hier der JOIN-Key mit v_ads_campaign_daily."
+      - name: impressions
+        type: INT64
+        description: "Number of times the ad was displayed"
+        definition: "Gezählt wenn eine Anzeige auf der Amazon-Suchergebnisseite oder Produktdetailseite gerendert wird. Addierbar via SUM(impressions) über Kampagnen/Tage. Wird für CTR benötigt."
+      - name: clicks
+        type: INT64
+        description: "Number of times a shopper clicked the ad"
+        definition: "Ein Klick wird gezählt wenn ein Shopper auf die Anzeige klickt. Addierbar. Wird für CTR, CPC, CVR verwendet — niemals CTR/CPC/CVR direkt summieren."
+      - name: cost
+        type: FLOAT64
+        description: "Total ad spend in account currency"
+        definition: "Gesamte CPC-Kosten für validierte Klicks. Addierbar via SUM(cost). Währung ist EUR für DE-Marktplatz, USD für US. Wird für ACoS, ROAS, CPC berechnet."
+      - name: purchases
+        type: INT64
+        description: "Attributed purchases within 1-day click window"
+        definition: "Bestellabschlüsse die einem Ad-Klick innerhalb von 24h zugeordnet werden. 1-Day-Attribution — NICHT vergleichbar mit SB-Purchases (14-Day). Addierbar via SUM."
+      - name: sales
+        type: FLOAT64
+        description: "Attributed sales revenue within 1-day click window, in account currency"
+        definition: "Umsatz aus Käufen die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar. SP-Attribution (1d) ≠ SB-Attribution (14d) — niemals beide in einer UNION aggregieren."
+      - name: units_sold
+        type: INT64
+        description: "Units sold attributed to ad clicks within 1-day window"
+        definition: "Anzahl einzelner Produkteinheiten die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar."
+      - name: acos
+        type: FLOAT64
+        description: "Advertising Cost of Sales = cost/sales × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, sales1d) * 100, 2). Beim Aggregieren IMMER neu berechnen: ROUND(SAFE_DIVIDE(SUM(cost), SUM(sales)) * 100, 2). Niemals SUM(acos)."
+      - name: roas
+        type: FLOAT64
+        description: "Return on Ad Spend = sales/cost [ratio]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(sales1d, cost), 2). Beim Aggregieren neu berechnen: ROUND(SAFE_DIVIDE(SUM(sales), SUM(cost)), 2). Niemals SUM(roas)."
+      - name: ctr
+        type: FLOAT64
+        description: "Click-through rate = clicks/impressions × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(clicks, impressions) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(clicks), SUM(impressions)) * 100, 2). Niemals direkt summieren oder mitteln."
+      - name: cpc
+        type: FLOAT64
+        description: "Cost per click = cost/clicks [currency]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, clicks), 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(cost), SUM(clicks)), 2). Niemals direkt summieren."
+      - name: cvr
+        type: FLOAT64
+        description: "Conversion rate = purchases/clicks × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(purchases1d, clicks) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(purchases), SUM(clicks)) * 100, 2). Niemals direkt summieren."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
 
   v_ads_searchterm_daily:
     description: "Search term performance — which customer search queries triggered ads"
@@ -122,28 +311,94 @@ views:
       - "Which broad match terms should become exact match?"
       - "Find negative keyword candidates (high cost, no sales)."
     columns:
-      - { name: date, type: DATE }
-      - { name: search_term, type: STRING, description: "Customer's search query" }
-      - { name: keyword, type: STRING, description: "Matched keyword from campaign" }
-      - { name: keyword_id, type: STRING }
-      - { name: keyword_type, type: STRING }
-      - { name: match_type, type: STRING, description: "BROAD, PHRASE, EXACT" }
-      - { name: campaign_name, type: STRING }
-      - { name: campaign_id, type: STRING }
-      - { name: ad_group_name, type: STRING }
-      - { name: ad_group_id, type: STRING }
-      - { name: impressions, type: INT64 }
-      - { name: clicks, type: INT64 }
-      - { name: cost, type: FLOAT64 }
-      - { name: purchases, type: INT64 }
-      - { name: sales, type: FLOAT64 }
-      - { name: units_sold, type: INT64 }
-      - { name: acos, type: FLOAT64, description: percentage }
-      - { name: roas, type: FLOAT64 }
-      - { name: ctr, type: FLOAT64, description: percentage }
-      - { name: cpc, type: FLOAT64 }
-      - { name: cvr, type: FLOAT64, description: percentage }
-      - { name: client_id, type: STRING }
+      - name: date
+        type: DATE
+        description: "Business date — the day these metrics apply to"
+        definition: "DATE in YYYY-MM-DD (Marktplatz-Timezone). Für Datumsfilter: WHERE date BETWEEN '2026-01-01' AND '2026-01-31'. Daten können 48–72h nach dem Datum noch nachjustiert werden."
+      - name: search_term
+        type: STRING
+        description: "Customer's actual search query that triggered the ad"
+        definition: "Der genaue Text den der Shopper in die Amazon-Suche eingegeben hat. Unterscheidet sich vom keyword (was targetiert wurde). Basis für Keyword-Recherche und Negative-Keywords."
+      - name: keyword
+        type: STRING
+        description: "The keyword from the campaign that matched the search term"
+        definition: "Das targetierte Keyword aus der Kampagne das den Treffer mit dem search_term ausgelöst hat. Ein Keyword kann viele search_terms triggern."
+      - name: keyword_id
+        type: STRING
+        description: "Amazon keyword ID"
+        definition: "Numerischer Identifier für das Keyword innerhalb einer Ad Group."
+      - name: keyword_type
+        type: STRING
+        description: "Keyword targeting type (e.g. BROAD, PHRASE, EXACT, AUTO)"
+        definition: "Bestimmt wie Amazon das Keyword mit Suchanfragen matcht. AUTO = automatisches Targeting ohne explizite Keywords."
+      - name: match_type
+        type: STRING
+        description: "Match type: BROAD, PHRASE, or EXACT"
+        definition: "BROAD = flexibelster Match (auch Varianten), PHRASE = Reihenfolge muss stimmen, EXACT = exakter Match. Beeinflusst Traffic-Volumen und Relevanz."
+      - name: campaign_name
+        type: STRING
+        description: "Campaign display name as set in Amazon Ads console"
+        definition: "Frei wählbarer Name, kann jederzeit geändert werden. Für JOINs campaign_id bevorzugen — v_ads_asin_daily hat keine campaign_id, daher dort campaign_name als JOIN-Key."
+      - name: campaign_id
+        type: STRING
+        description: "Unique campaign identifier"
+        definition: "Numerischer Amazon-Campaign-ID als STRING. Stabiler JOIN-Key — wird niemals wiederverwendet. Nur innerhalb eines Advertising-Profils eindeutig."
+      - name: ad_group_name
+        type: STRING
+        description: "Ad group name (from search term data)"
+        definition: "Name der Ad Group zu der dieser Search Term gehört."
+      - name: ad_group_id
+        type: STRING
+        description: "Ad group identifier (from search term data)"
+        definition: "Amazon Ad Group ID. JOIN-Key mit v_ads_adgroup_daily via adgroup_id = ad_group_id."
+      - name: impressions
+        type: INT64
+        description: "Number of times the ad was displayed"
+        definition: "Gezählt wenn eine Anzeige auf der Amazon-Suchergebnisseite oder Produktdetailseite gerendert wird. Addierbar via SUM(impressions) über Kampagnen/Tage. Wird für CTR benötigt."
+      - name: clicks
+        type: INT64
+        description: "Number of times a shopper clicked the ad"
+        definition: "Ein Klick wird gezählt wenn ein Shopper auf die Anzeige klickt. Addierbar. Wird für CTR, CPC, CVR verwendet — niemals CTR/CPC/CVR direkt summieren."
+      - name: cost
+        type: FLOAT64
+        description: "Total ad spend in account currency"
+        definition: "Gesamte CPC-Kosten für validierte Klicks. Addierbar via SUM(cost). Währung ist EUR für DE-Marktplatz, USD für US. Wird für ACoS, ROAS, CPC berechnet."
+      - name: purchases
+        type: INT64
+        description: "Attributed purchases within 1-day click window"
+        definition: "Bestellabschlüsse die einem Ad-Klick innerhalb von 24h zugeordnet werden. 1-Day-Attribution — NICHT vergleichbar mit SB-Purchases (14-Day). Addierbar via SUM."
+      - name: sales
+        type: FLOAT64
+        description: "Attributed sales revenue within 1-day click window, in account currency"
+        definition: "Umsatz aus Käufen die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar. SP-Attribution (1d) ≠ SB-Attribution (14d) — niemals beide in einer UNION aggregieren."
+      - name: units_sold
+        type: INT64
+        description: "Units sold attributed to ad clicks within 1-day window"
+        definition: "Anzahl einzelner Produkteinheiten die einem Ad-Klick innerhalb von 24h zugeordnet werden. Addierbar."
+      - name: acos
+        type: FLOAT64
+        description: "Advertising Cost of Sales = cost/sales × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, sales1d) * 100, 2). Beim Aggregieren IMMER neu berechnen: ROUND(SAFE_DIVIDE(SUM(cost), SUM(sales)) * 100, 2). Niemals SUM(acos)."
+      - name: roas
+        type: FLOAT64
+        description: "Return on Ad Spend = sales/cost [ratio]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(sales1d, cost), 2). Beim Aggregieren neu berechnen: ROUND(SAFE_DIVIDE(SUM(sales), SUM(cost)), 2). Niemals SUM(roas)."
+      - name: ctr
+        type: FLOAT64
+        description: "Click-through rate = clicks/impressions × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(clicks, impressions) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(clicks), SUM(impressions)) * 100, 2). Niemals direkt summieren oder mitteln."
+      - name: cpc
+        type: FLOAT64
+        description: "Cost per click = cost/clicks [currency]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(cost, clicks), 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(cost), SUM(clicks)), 2). Niemals direkt summieren."
+      - name: cvr
+        type: FLOAT64
+        description: "Conversion rate = purchases/clicks × 100 [%]"
+        definition: "Vorberechnet via ROUND(SAFE_DIVIDE(purchases1d, clicks) * 100, 2). Beim Aggregieren: ROUND(SAFE_DIVIDE(SUM(purchases), SUM(clicks)) * 100, 2). Niemals direkt summieren."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
 
   rf_products:
     description: "Product catalog data collected via the Rainforest API"
@@ -157,36 +412,126 @@ views:
       - "List advertised products with their ratings and prices."
     important: "This is a raw table (not a view), and it may have multiple snapshots per ASIN. Always use the latest snapshot by filtering with ROW_NUMBER() OVER (PARTITION BY asin ORDER BY snapshot_date DESC) = 1."
     columns:
-      - { name: snapshot_date, type: STRING, description: "Date the product data was collected (YYYY-MM-DD)" }
-      - { name: asin, type: STRING, description: "Amazon Standard Identification Number — JOIN key with v_ads_asin_daily" }
-      - { name: collection_id, type: STRING, description: "Rainforest collection identifier" }
-      - { name: title, type: STRING, description: "Product title / name" }
-      - { name: brand, type: STRING, description: "Brand name" }
-      - { name: link, type: STRING, description: "Amazon product page URL" }
-      - { name: rating, type: FLOAT64, description: "Average star rating (1-5)" }
-      - { name: ratings_total, type: INT64, description: "Total number of ratings" }
-      - { name: images_count, type: INT64 }
-      - { name: has_a_plus_content, type: BOOLEAN }
-      - { name: has_brand_story, type: BOOLEAN }
-      - { name: feature_bullets_count, type: INT64 }
-      - { name: videos_count, type: INT64 }
-      - { name: bestsellers_rank_flat, type: STRING, description: "BSR as text" }
-      - { name: bestsellers_rank_1, type: INT64, description: "Primary BSR rank" }
-      - { name: bestsellers_rank_1_category, type: STRING, description: "Primary BSR category" }
-      - { name: categories_flat, type: STRING }
-      - { name: recent_sales, type: STRING }
-      - { name: buybox_price, type: FLOAT64 }
-      - { name: buybox_currency, type: STRING }
-      - { name: buybox_rrp, type: FLOAT64, description: "Recommended retail price" }
-      - { name: buybox_seller_name, type: STRING }
-      - { name: buybox_seller_id, type: STRING }
-      - { name: is_sold_by_amazon, type: BOOLEAN }
-      - { name: is_fulfilled_by_amazon, type: BOOLEAN }
-      - { name: is_prime, type: BOOLEAN }
-      - { name: availability_type, type: STRING }
-      - { name: availability_raw, type: STRING }
-      - { name: client_id, type: STRING }
-      - { name: loaded_at, type: STRING, description: "When the data was loaded into BigQuery" }
+      - name: snapshot_date
+        type: STRING
+        description: "Date the product data was collected (YYYY-MM-DD)"
+        definition: "STRING-Datum des Rainforest-Scrapes. Für aktuellen Zustand immer auf neuestes Datum filtern: ROW_NUMBER() OVER (PARTITION BY asin ORDER BY snapshot_date DESC) = 1."
+      - name: asin
+        type: STRING
+        description: "Amazon Standard Identification Number — JOIN key with v_ads_asin_daily"
+        definition: "10-stelliger alphanumerischer Amazon-Produktidentifier. JOIN-Key zwischen v_ads_asin_daily und rf_products. Unique per Variante (Child ASIN)."
+      - name: collection_id
+        type: STRING
+        description: "Rainforest collection identifier"
+        definition: "ID der Rainforest-Collection die diesen Snapshot erzeugt hat. Für normale Analysen nicht relevant."
+      - name: title
+        type: STRING
+        description: "Product listing title on Amazon"
+        definition: "Aktueller Produkttitel wie er auf Amazon angezeigt wird. Für Anzeige neben ASIN-Daten aus den Ads Views nutzen."
+      - name: brand
+        type: STRING
+        description: "Brand name as listed on Amazon"
+        definition: "Markenname des Produkts. Für Marken-Filterung oder Gruppierung."
+      - name: link
+        type: STRING
+        description: "Amazon product page URL"
+        definition: "Direktlink zur Amazon-Produktseite. Nützlich für Referenzzwecke, nicht für SQL-Berechnungen."
+      - name: rating
+        type: FLOAT64
+        description: "Average star rating (1-5)"
+        definition: "Durchschnittliche Bewertung zum Zeitpunkt des Scrapes. Ändert sich langsam. Nicht summierbar."
+      - name: ratings_total
+        type: INT64
+        description: "Total number of ratings"
+        definition: "Gesamtanzahl der Rezensionen zum Zeitpunkt des Scrapes. Addierbar für Vergleiche, aber Snapshot-Wert."
+      - name: images_count
+        type: INT64
+        description: "Number of product images on the listing"
+        definition: "Anzahl Produktbilder. Teil des Listing Quality Scores (max. 25 Punkte bei ≥7 Bilder)."
+      - name: has_a_plus_content
+        type: BOOLEAN
+        description: "Whether the listing has A+ (Enhanced Brand) Content"
+        definition: "Boolean. A+ Content verbessert Conversion. Wert 20 im Listing Quality Score."
+      - name: has_brand_story
+        type: BOOLEAN
+        description: "Whether the listing has a Brand Story section"
+        definition: "Boolean. Teil des Listing Quality Scores (5 Punkte)."
+      - name: feature_bullets_count
+        type: INT64
+        description: "Number of bullet points on the listing"
+        definition: "Anzahl Feature-Bullets. Optimal ≥5 Bullets. Beeinflusst Listing Quality Score (10 Punkte)."
+      - name: videos_count
+        type: INT64
+        description: "Number of product videos on the listing"
+        definition: "Anzahl Videos. Nicht direkt im Listing Quality Score aber Listing-Qualitätsindikator."
+      - name: bestsellers_rank_flat
+        type: STRING
+        description: "Bestseller rank as flat text string"
+        definition: "BSR als Rohtext (z.B. '#3 in Nahrungsergänzungsmittel'). Für Parsing bestsellers_rank_1 und bestsellers_rank_1_category nutzen."
+      - name: bestsellers_rank_1
+        type: INT64
+        description: "Primary bestseller rank (numeric, lower is better)"
+        definition: "Numerischer Hauptrang in der primären Kategorie. Niedriger = besser. NULL wenn kein BSR vorhanden."
+      - name: bestsellers_rank_1_category
+        type: STRING
+        description: "Category of the primary bestseller rank"
+        definition: "Amazon-Kategoriename für bestsellers_rank_1. Für Vergleiche nur innerhalb derselben Kategorie sinnvoll."
+      - name: categories_flat
+        type: STRING
+        description: "Full category path as text"
+        definition: "Kategorie-Breadcrumb als flacher Text. Für Kategorisierung von Produkten."
+      - name: recent_sales
+        type: STRING
+        description: "Recent sales badge text (e.g. '100+ bought last month')"
+        definition: "Amazons 'X+ mal letzten Monat gekauft' Badge als Text. NULL wenn nicht angezeigt. Kein exakter Zahlenwert — für Trending-Produkte Indikator."
+      - name: buybox_price
+        type: FLOAT64
+        description: "Current Buy Box price in buybox_currency"
+        definition: "Preis des Buy Box Winners zum Zeitpunkt des Scrapes. NULL wenn kein Buy Box vorhanden."
+      - name: buybox_currency
+        type: STRING
+        description: "Currency code for buybox_price"
+        definition: "ISO 4217 Währungscode für buybox_price und buybox_rrp."
+      - name: buybox_rrp
+        type: FLOAT64
+        description: "Recommended retail price (if shown)"
+        definition: "Unverbindliche Preisempfehlung wie auf Amazon angezeigt. NULL wenn nicht vorhanden."
+      - name: buybox_seller_name
+        type: STRING
+        description: "Name of the current Buy Box winner"
+        definition: "Anzeigename des Sellers der aktuell die Buy Box hält. 'Amazon' = Amazon Retail (1P)."
+      - name: buybox_seller_id
+        type: STRING
+        description: "Amazon seller ID of the Buy Box winner"
+        definition: "Amazon-interne Seller-ID des Buy Box Winners. Stabiler als buybox_seller_name."
+      - name: is_sold_by_amazon
+        type: BOOLEAN
+        description: "Whether Amazon Retail (1P) is the seller"
+        definition: "Boolean. true = Amazon selbst verkauft das Produkt (1P). Relevant für Buy Box Analyse."
+      - name: is_fulfilled_by_amazon
+        type: BOOLEAN
+        description: "Whether fulfilled by Amazon (FBA)"
+        definition: "Boolean. true = Versand durch Amazon (FBA). false = Versand durch Händler (FBM)."
+      - name: is_prime
+        type: BOOLEAN
+        description: "Whether the product has Amazon Prime badge"
+        definition: "Boolean. Prime-Badge erhöht Conversion. FBA-Produkte sind typischerweise Prime."
+      - name: availability_type
+        type: STRING
+        description: "Stock availability status: in_stock, out_of_stock, etc."
+        definition: "Rainforest-normalisierter Verfügbarkeitsstatus. Für OOS-Monitoring zusammen mit Ads-Spend nutzen."
+      - name: availability_raw
+        type: STRING
+        description: "Localized availability text as shown on Amazon"
+        definition: "Rohtext wie auf Amazon angezeigt (z.B. 'Auf Lager', 'Nur noch 3 auf Lager'). Marktplatz-spezifisch."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
+      - name: loaded_at
+        type: STRING
+        description: "UTC timestamp when loaded into BigQuery"
+        definition: "STRING-Timestamp im ISO-8601-Format. Nicht für Geschäftsanalysen nutzen — nur für Pipeline-Debugging."
 
 
   pma_sales_traffic_by_date:
@@ -203,31 +548,106 @@ views:
       - "How many units were refunded this month?"
     important: "Averages and percentages (refundRate, buyBoxPercentage, unitSessionPercentage, etc.) are pre-computed daily values. Do NOT sum them across days — recalculate from underlying totals. For example, weekly conversion rate = SUM(sales_totalOrderItems) / SUM(traffic_sessions) * 100."
     columns:
-      - { name: date, type: STRING, description: "Business date YYYY-MM-DD (marketplace timezone)" }
-      - { name: account_id, type: STRING, description: "Amazon seller account ID" }
-      - { name: marketplace_id, type: STRING, description: "Amazon marketplace (ID_CLIENT_01 = DE)" }
-      - { name: sales_orderedProductSales_amount, type: FLOAT64, description: "Total ordered product sales revenue" }
-      - { name: sales_orderedProductSales_currencyCode, type: STRING, description: "Currency (EUR, USD)" }
-      - { name: sales_orderedProductSalesB2B_amount, type: FLOAT64, description: "B2B ordered sales revenue" }
-      - { name: sales_unitsOrdered, type: FLOAT64, description: "Total units ordered" }
-      - { name: sales_unitsOrderedB2B, type: FLOAT64, description: "B2B units ordered" }
-      - { name: sales_totalOrderItems, type: FLOAT64, description: "Total order line items" }
-      - { name: sales_averageSellingPrice_amount, type: FLOAT64, description: "Average selling price per unit (do NOT sum)" }
-      - { name: sales_averageUnitsPerOrderItem, type: FLOAT64, description: "Average units per order item (do NOT sum)" }
-      - { name: sales_unitsRefunded, type: FLOAT64, description: "Units refunded" }
-      - { name: sales_refundRate, type: FLOAT64, description: "Refund rate % (do NOT sum)" }
-      - { name: sales_shippedProductSales_amount, type: FLOAT64, description: "Revenue from shipped orders" }
-      - { name: sales_unitsShipped, type: FLOAT64, description: "Units shipped" }
-      - { name: sales_ordersShipped, type: FLOAT64, description: "Distinct orders shipped" }
-      - { name: traffic_pageViews, type: FLOAT64, description: "Total detail page views (browser + app)" }
-      - { name: traffic_sessions, type: FLOAT64, description: "Total unique visitor sessions" }
-      - { name: traffic_buyBoxPercentage, type: FLOAT64, description: "Buy Box win rate % (do NOT sum)" }
-      - { name: traffic_orderItemSessionPercentage, type: FLOAT64, description: "Conversion rate % = order items / sessions (do NOT sum)" }
-      - { name: traffic_unitSessionPercentage, type: FLOAT64, description: "Unit session % = units / sessions (do NOT sum)" }
-      - { name: traffic_feedbackReceived, type: FLOAT64, description: "Seller feedback ratings received" }
-      - { name: traffic_negativeFeedbackReceived, type: FLOAT64, description: "Negative seller feedback" }
-      - { name: client_id, type: STRING }
-      - { name: loaded_at, type: STRING }
+      - name: date
+        type: STRING
+        description: "Business date YYYY-MM-DD (marketplace timezone)"
+        definition: "STRING-Datum im Format YYYY-MM-DD. Marktplatz-Timezone. Für Datumsfilter als STRING vergleichen: WHERE date BETWEEN '2026-01-01' AND '2026-01-31'."
+      - name: account_id
+        type: STRING
+        description: "Amazon seller account ID"
+        definition: "Amazon Seller-Account-ID. Für Multi-Account-Clients relevant, für Einzelaccounts konstant."
+      - name: marketplace_id
+        type: STRING
+        description: "Amazon marketplace (ID_CLIENT_01 = DE)"
+        definition: "Amazon-interne Marketplace-ID. Konstant für DE-Marktplatz. ID_CLIENT_01 = Deutschland."
+      - name: sales_orderedProductSales_amount
+        type: FLOAT64
+        description: "Total ordered product sales revenue"
+        definition: "Gesamtumsatz aller bestellten Produkte (Organic + Ads + alle Quellen). Addierbar. NICHT direkt mit Ads-Sales vergleichen — SC-Umsatz ist immer höher."
+      - name: sales_orderedProductSales_currencyCode
+        type: STRING
+        description: "Currency (EUR, USD)"
+        definition: "ISO 4217 Währungscode für alle Geldwerte in dieser Zeile. DE = EUR."
+      - name: sales_orderedProductSalesB2B_amount
+        type: FLOAT64
+        description: "B2B ordered sales revenue"
+        definition: "Umsatz aus Amazon Business (B2B) Bestellungen. Addierbar. Teilmenge von sales_orderedProductSales_amount."
+      - name: sales_unitsOrdered
+        type: FLOAT64
+        description: "Total units ordered"
+        definition: "Anzahl bestellter Einheiten über alle Kanäle. Addierbar via SUM."
+      - name: sales_unitsOrderedB2B
+        type: FLOAT64
+        description: "B2B units ordered"
+        definition: "Bestellte Einheiten aus B2B-Bestellungen. Addierbar. Teilmenge von sales_unitsOrdered."
+      - name: sales_totalOrderItems
+        type: FLOAT64
+        description: "Total order line items"
+        definition: "Anzahl der Bestellpositionen (Order Items). Addierbar. Nenner für Conversion Rate Berechnung: SUM(sales_totalOrderItems) / SUM(traffic_sessions) * 100."
+      - name: sales_averageSellingPrice_amount
+        type: FLOAT64
+        description: "Average selling price per unit (do NOT sum)"
+        definition: "Durchschnittlicher Verkaufspreis pro Einheit am jeweiligen Tag. Vorberechnet — niemals SUM(). Für Zeitreihen Gewichtung mit sales_unitsOrdered verwenden."
+      - name: sales_averageUnitsPerOrderItem
+        type: FLOAT64
+        description: "Average units per order item (do NOT sum)"
+        definition: "Durchschnittliche Einheiten pro Bestellposition. Vorberechnet — niemals SUM(). Für Perioden neu berechnen: SUM(unitsOrdered)/SUM(totalOrderItems)."
+      - name: sales_unitsRefunded
+        type: FLOAT64
+        description: "Units refunded"
+        definition: "Anzahl zurückgegebener Einheiten. Addierbar via SUM."
+      - name: sales_refundRate
+        type: FLOAT64
+        description: "Refund rate % (do NOT sum)"
+        definition: "Vorberechnete Retourenquote in Prozent. Niemals SUM(). Für Perioden neu berechnen: ROUND(SUM(unitsRefunded)/SUM(unitsOrdered)*100, 2)."
+      - name: sales_shippedProductSales_amount
+        type: FLOAT64
+        description: "Revenue from shipped orders"
+        definition: "Umsatz aus tatsächlich versendeten Bestellungen. Addierbar. Kann von orderedProductSales abweichen wenn Bestellungen storniert werden."
+      - name: sales_unitsShipped
+        type: FLOAT64
+        description: "Units shipped"
+        definition: "Anzahl tatsächlich versendeter Einheiten. Addierbar."
+      - name: sales_ordersShipped
+        type: FLOAT64
+        description: "Distinct orders shipped"
+        definition: "Anzahl versendeter Bestellungen (nicht Einheiten). Addierbar."
+      - name: traffic_pageViews
+        type: FLOAT64
+        description: "Total detail page views (browser + app)"
+        definition: "Summe aller Produktdetailseitenaufrufe über alle Geräte und Apps. Addierbar. Höher als sessions wenn ein Shopper mehrfach dieselbe Seite besucht."
+      - name: traffic_sessions
+        type: FLOAT64
+        description: "Total unique visitor sessions"
+        definition: "Anzahl eindeutiger Besucher-Sessions. Addierbar. Nenner für Conversion Rate und Buy Box Berechnung."
+      - name: traffic_buyBoxPercentage
+        type: FLOAT64
+        description: "Buy Box win rate % (do NOT sum)"
+        definition: "Anteil der Seitenaufrufe bei denen der Client die Buy Box hielt. Vorberechnet — niemals SUM(). Für Perioden: gewichteter Durchschnitt via SUM(buyBoxPercentage*sessions)/SUM(sessions)."
+      - name: traffic_orderItemSessionPercentage
+        type: FLOAT64
+        description: "Conversion rate % = order items / sessions (do NOT sum)"
+        definition: "Vorberechnete Conversion Rate (Order Items pro Session). Niemals SUM(). Für Perioden: SUM(totalOrderItems)/SUM(sessions)*100."
+      - name: traffic_unitSessionPercentage
+        type: FLOAT64
+        description: "Unit session % = units / sessions (do NOT sum)"
+        definition: "Vorberechneter Anteil bestellter Einheiten pro Session. Niemals SUM(). Für Perioden: SUM(unitsOrdered)/SUM(sessions)*100."
+      - name: traffic_feedbackReceived
+        type: FLOAT64
+        description: "Seller feedback ratings received"
+        definition: "Anzahl erhaltener Seller-Bewertungen am jeweiligen Tag. Addierbar."
+      - name: traffic_negativeFeedbackReceived
+        type: FLOAT64
+        description: "Negative seller feedback"
+        definition: "Anzahl negativer Seller-Bewertungen am jeweiligen Tag. Addierbar."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
+      - name: loaded_at
+        type: STRING
+        description: "UTC timestamp when loaded into BigQuery"
+        definition: "STRING-Timestamp im ISO-8601-Format. Nicht für Geschäftsanalysen nutzen — nur für Pipeline-Debugging."
 
   pma_sales_traffic_by_child_asin:
     description: "Daily per-child-ASIN sales and traffic from Seller Central (includes B2B breakdowns)"
@@ -241,26 +661,86 @@ views:
       - "Show me B2B vs total units ordered"
       - "Compare shipped vs ordered units per ASIN"
     columns:
-      - { name: date, type: STRING, description: "Business date YYYY-MM-DD" }
-      - { name: asin, type: STRING, description: "Child ASIN — JOIN key with other tables" }
-      - { name: parent_asin, type: STRING, description: "Parent ASIN (product family)" }
-      - { name: dataFreshness, type: STRING, description: "When Amazon last refreshed this data" }
-      - { name: sales_unitsOrdered, type: FLOAT64, description: "Units ordered (all channels)" }
-      - { name: sales_unitsOrderedB2B, type: FLOAT64, description: "Units ordered (B2B only)" }
-      - { name: sales_orderedProductSales_amount, type: FLOAT64, description: "Revenue (all channels)" }
-      - { name: sales_unitsShipped, type: FLOAT64, description: "Units shipped" }
-      - { name: sales_shippedProductSales_amount, type: FLOAT64, description: "Shipped revenue" }
-      - { name: sales_unitsRefunded, type: FLOAT64, description: "Units refunded" }
-      - { name: sales_refundRate, type: FLOAT64, description: "Refund rate (do NOT sum)" }
-      - { name: refund_rate, type: FLOAT64, description: "Refund rate all channels (do NOT sum)" }
-      - { name: refund_rateB2B, type: FLOAT64, description: "Refund rate B2B (do NOT sum)" }
-      - { name: unit_session_percentage, type: FLOAT64, description: "Conversion rate (do NOT sum)" }
-      - { name: traffic_sessions, type: FLOAT64, description: "Total sessions" }
-      - { name: traffic_sessionsB2B, type: FLOAT64, description: "B2B sessions" }
-      - { name: traffic_pageViews, type: FLOAT64, description: "Total page views" }
-      - { name: traffic_pageViewsB2B, type: FLOAT64, description: "B2B page views" }
-      - { name: client_id, type: STRING }
-      - { name: loaded_at, type: STRING }
+      - name: date
+        type: STRING
+        description: "Business date YYYY-MM-DD"
+        definition: "STRING-Datum im Format YYYY-MM-DD. Marktplatz-Timezone. Für Datumsfilter als STRING vergleichen: WHERE date BETWEEN '2026-01-01' AND '2026-01-31'."
+      - name: asin
+        type: STRING
+        description: "Child ASIN — JOIN key with other tables"
+        definition: "10-stelliger Amazon-Produktidentifier (Child ASIN). JOIN-Key mit v_ads_asin_daily und rf_products."
+      - name: parent_asin
+        type: STRING
+        description: "Parent ASIN (product family)"
+        definition: "Amazon Parent ASIN der Produktfamilie. Alle Child ASINs einer Produktvariante teilen denselben Parent ASIN."
+      - name: dataFreshness
+        type: STRING
+        description: "When Amazon last refreshed this data"
+        definition: "Zeitstempel wann Amazon diese Daten zuletzt aktualisiert hat. Nicht für Geschäftsanalysen — nur zur Datenqualitätsprüfung."
+      - name: sales_unitsOrdered
+        type: FLOAT64
+        description: "Units ordered (all channels)"
+        definition: "Bestellte Einheiten über alle Kanäle. Addierbar. Entspricht dem Child-ASIN-Level Pendant zu pma_sales_traffic_by_date."
+      - name: sales_unitsOrderedB2B
+        type: FLOAT64
+        description: "Units ordered (B2B only)"
+        definition: "Bestellte Einheiten aus Amazon Business (B2B) Bestellungen. Addierbar. Teilmenge von sales_unitsOrdered."
+      - name: sales_orderedProductSales_amount
+        type: FLOAT64
+        description: "Revenue (all channels)"
+        definition: "Gesamtumsatz für diesen Child ASIN. Addierbar. NICHT direkt mit Ads-Sales vergleichen."
+      - name: sales_unitsShipped
+        type: FLOAT64
+        description: "Units shipped"
+        definition: "Anzahl tatsächlich versendeter Einheiten für diesen ASIN. Addierbar."
+      - name: sales_shippedProductSales_amount
+        type: FLOAT64
+        description: "Shipped revenue"
+        definition: "Umsatz aus versendeten Bestellungen für diesen ASIN. Addierbar."
+      - name: sales_unitsRefunded
+        type: FLOAT64
+        description: "Units refunded"
+        definition: "Anzahl zurückgegebener Einheiten für diesen ASIN. Addierbar."
+      - name: sales_refundRate
+        type: FLOAT64
+        description: "Refund rate (do NOT sum)"
+        definition: "Vorberechnete Retourenquote. Niemals SUM(). Für Perioden: SUM(unitsRefunded)/SUM(unitsOrdered)*100."
+      - name: refund_rate
+        type: FLOAT64
+        description: "Refund rate all channels (do NOT sum)"
+        definition: "Retourenquote über alle Kanäle. Vorberechnet — niemals SUM(). Kann leicht von sales_refundRate abweichen je nach Berechnungsbasis."
+      - name: refund_rateB2B
+        type: FLOAT64
+        description: "Refund rate B2B (do NOT sum)"
+        definition: "Retourenquote für B2B-Bestellungen. Vorberechnet — niemals SUM()."
+      - name: unit_session_percentage
+        type: FLOAT64
+        description: "Conversion rate (do NOT sum)"
+        definition: "Vorberechneter Anteil bestellter Einheiten pro Session auf Child-ASIN-Ebene. Niemals SUM(). Für Perioden: SUM(unitsOrdered)/SUM(sessions)*100."
+      - name: traffic_sessions
+        type: FLOAT64
+        description: "Total sessions"
+        definition: "Anzahl Besucher-Sessions für diesen ASIN. Addierbar."
+      - name: traffic_sessionsB2B
+        type: FLOAT64
+        description: "B2B sessions"
+        definition: "Anzahl B2B-Besucher-Sessions. Addierbar. Teilmenge von traffic_sessions."
+      - name: traffic_pageViews
+        type: FLOAT64
+        description: "Total page views"
+        definition: "Summe aller Produktdetailseitenaufrufe für diesen ASIN. Addierbar."
+      - name: traffic_pageViewsB2B
+        type: FLOAT64
+        description: "B2B page views"
+        definition: "Seitenaufrufe aus B2B-Sessions. Addierbar. Teilmenge von traffic_pageViews."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
+      - name: loaded_at
+        type: STRING
+        description: "UTC timestamp when loaded into BigQuery"
+        definition: "STRING-Timestamp im ISO-8601-Format. Nicht für Geschäftsanalysen nutzen — nur für Pipeline-Debugging."
 
   pma_orders:
     description: "Individual order line items from Seller Central"
@@ -276,27 +756,90 @@ views:
       - "How many B2B orders did we get?"
     important: "order_total and number_of_items are per-order, not per-line-item. When aggregating, use COUNT(DISTINCT amazon_order_id) for order counts, not COUNT(*)."
     columns:
-      - { name: date, type: STRING, description: "Order purchase date YYYY-MM-DD" }
-      - { name: amazon_order_id, type: STRING, description: "Unique order ID — group by this for per-order analysis" }
-      - { name: asin, type: STRING, description: "Product ASIN — JOIN key with other tables" }
-      - { name: parent_asin, type: STRING, description: "Parent ASIN (product family)" }
-      - { name: sku, type: STRING, description: "Seller's SKU" }
-      - { name: product_name, type: STRING, description: "Product title" }
-      - { name: quantity, type: FLOAT64, description: "Units in this line item" }
-      - { name: item_price, type: FLOAT64, description: "Line item subtotal (qty × unit price)" }
-      - { name: item_tax, type: FLOAT64, description: "Tax on item price" }
-      - { name: currency, type: STRING, description: "Currency code (EUR, USD)" }
-      - { name: order_total, type: FLOAT64, description: "Full order total (same across line items of one order)" }
-      - { name: order_status, type: STRING, description: "Pending, Unshipped, Shipped, Cancelled" }
-      - { name: item_status, type: STRING, description: "Per-item status" }
-      - { name: fulfillment_channel, type: STRING, description: "Amazon (FBA) or Merchant (FBM)" }
-      - { name: ship_city, type: STRING, description: "Shipping destination city" }
-      - { name: ship_state, type: STRING, description: "Shipping destination state/region" }
-      - { name: ship_postal_code, type: STRING, description: "Shipping postal code" }
-      - { name: ship_country, type: STRING, description: "Shipping country code (DE, AT, etc.)" }
-      - { name: is_business_order, type: STRING, description: "true/false — Amazon Business order" }
-      - { name: client_id, type: STRING }
-      - { name: loaded_at, type: STRING }
+      - name: date
+        type: STRING
+        description: "Order purchase date YYYY-MM-DD"
+        definition: "STRING-Datum der Bestellaufgabe. Marktplatz-Timezone. Für Datumsfilter als STRING vergleichen."
+      - name: amazon_order_id
+        type: STRING
+        description: "Unique order ID — group by this for per-order analysis"
+        definition: "Amazon-interne Bestell-ID. Für Bestellzählungen immer COUNT(DISTINCT amazon_order_id) nutzen — COUNT(*) zählt Line Items, nicht Bestellungen."
+      - name: asin
+        type: STRING
+        description: "Product ASIN — JOIN key with other tables"
+        definition: "10-stelliger Amazon-Produktidentifier. JOIN-Key mit rf_products und pma_inventory_fba."
+      - name: parent_asin
+        type: STRING
+        description: "Parent ASIN (product family)"
+        definition: "Amazon Parent ASIN der Produktfamilie. Alle Child ASINs einer Produktvariante teilen denselben Parent ASIN."
+      - name: sku
+        type: STRING
+        description: "Seller's SKU"
+        definition: "Händler-interner Produktcode. Kann sich ändern. Für Produktanalysen asin bevorzugen."
+      - name: product_name
+        type: STRING
+        description: "Product title"
+        definition: "Produkttitel zum Zeitpunkt der Bestellung. Kann von rf_products.title abweichen wenn der Titel nachträglich geändert wurde."
+      - name: quantity
+        type: FLOAT64
+        description: "Units in this line item"
+        definition: "Anzahl Einheiten für diese Bestellposition. Addierbar via SUM(quantity) für Gesamteinheiten."
+      - name: item_price
+        type: FLOAT64
+        description: "Line item subtotal (qty × unit price)"
+        definition: "Gesamtpreis dieser Bestellposition (Menge × Einzelpreis). Addierbar via SUM(item_price)."
+      - name: item_tax
+        type: FLOAT64
+        description: "Tax on item price"
+        definition: "Steueranteil für diese Bestellposition. Addierbar."
+      - name: currency
+        type: STRING
+        description: "Currency code (EUR, USD)"
+        definition: "ISO 4217 Währungscode. DE-Marktplatz = EUR."
+      - name: order_total
+        type: FLOAT64
+        description: "Full order total (same across line items of one order)"
+        definition: "Gesamtbestellwert — dieser Wert ist für alle Line Items derselben Bestellung identisch. NIEMALS SUM(order_total) — stattdessen SUM(item_price) für Umsatz oder MAX(order_total) per amazon_order_id."
+      - name: order_status
+        type: STRING
+        description: "Pending, Unshipped, Shipped, Cancelled"
+        definition: "Aktueller Status der Bestellung. Für Umsatzanalysen nur Shipped berücksichtigen. Cancelled-Bestellungen aus Umsatzberechnungen ausschließen."
+      - name: item_status
+        type: STRING
+        description: "Per-item status"
+        definition: "Status auf Bestellpositions-Ebene. Kann von order_status abweichen bei Teillieferungen."
+      - name: fulfillment_channel
+        type: STRING
+        description: "Amazon (FBA) or Merchant (FBM)"
+        definition: "Versandweg: 'Amazon' = FBA (Versand durch Amazon), 'Merchant' = FBM (Versand durch Händler). Für FBA-Anteil: COUNT(DISTINCT CASE WHEN fulfillment_channel = 'Amazon' THEN amazon_order_id END) / COUNT(DISTINCT amazon_order_id)."
+      - name: ship_city
+        type: STRING
+        description: "Shipping destination city"
+        definition: "Versandort auf Stadtebene. Für geographische Nachfrageanalysen nutzen."
+      - name: ship_state
+        type: STRING
+        description: "Shipping destination state/region"
+        definition: "Versandort auf Bundesland-/Regionsebene. Für regionale Analysen nutzen."
+      - name: ship_postal_code
+        type: STRING
+        description: "Shipping postal code"
+        definition: "Postleitzahl des Versandorts. Als STRING gespeichert — numerische Vergleiche vermeiden."
+      - name: ship_country
+        type: STRING
+        description: "Shipping country code (DE, AT, etc.)"
+        definition: "Zweistelliger ISO-Ländercode des Versandorts. Für Multi-Country-Analysen nutzen."
+      - name: is_business_order
+        type: STRING
+        description: "true/false — Amazon Business order"
+        definition: "STRING 'true' oder 'false'. Amazon Business (B2B) Bestellung. Für B2B-Filter: WHERE is_business_order = 'true'."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
+      - name: loaded_at
+        type: STRING
+        description: "UTC timestamp when loaded into BigQuery"
+        definition: "STRING-Timestamp im ISO-8601-Format. Nicht für Geschäftsanalysen nutzen — nur für Pipeline-Debugging."
 
   pma_inventory:
     description: "Current merchant inventory listings snapshot from Seller Central"
@@ -310,18 +853,54 @@ views:
       - "Show me inventory quantities by product"
     important: "This is a snapshot — always filter to the latest date: WHERE date = (SELECT MAX(date) FROM pma_inventory WHERE client_id = '...')"
     columns:
-      - { name: date, type: STRING, description: "Snapshot collection date YYYY-MM-DD" }
-      - { name: asin, type: STRING, description: "Product ASIN" }
-      - { name: seller_sku, type: STRING, description: "Seller's SKU" }
-      - { name: item_name, type: STRING, description: "Product listing title" }
-      - { name: price, type: STRING, description: "Current listing price (as text)" }
-      - { name: inventory_quantity, type: FLOAT64, description: "Available inventory units" }
-      - { name: pending_quantity, type: FLOAT64, description: "Pending/reserved units" }
-      - { name: item_condition, type: STRING, description: "New, Refurbished, Used*" }
-      - { name: fulfillment_channel, type: STRING, description: "DEFAULT (FBM) or AMAZON_NA (FBA)" }
-      - { name: open_date, type: STRING, description: "Listing creation date" }
-      - { name: client_id, type: STRING }
-      - { name: loaded_at, type: STRING }
+      - name: date
+        type: STRING
+        description: "Snapshot collection date YYYY-MM-DD"
+        definition: "STRING-Datum des Inventory-Snapshots. Für aktuellen Stand immer auf neuestes Datum filtern: WHERE date = (SELECT MAX(date) FROM pma_inventory WHERE client_id = '...')."
+      - name: asin
+        type: STRING
+        description: "Product ASIN"
+        definition: "10-stelliger Amazon-Produktidentifier. JOIN-Key mit anderen Tabellen."
+      - name: seller_sku
+        type: STRING
+        description: "Seller's SKU"
+        definition: "Händler-interner Produktcode. Primärschlüssel in dieser Tabelle auf Snapshot-Ebene."
+      - name: item_name
+        type: STRING
+        description: "Product listing title"
+        definition: "Produkttitel wie im Listing gesetzt. Zum Zeitpunkt des Snapshots gültig."
+      - name: price
+        type: STRING
+        description: "Current listing price (as text)"
+        definition: "Aktueller Listenpreis als TEXT-String. Für numerische Berechnungen CAST(price AS FLOAT64) nutzen — enthält ggf. Währungssymbole."
+      - name: inventory_quantity
+        type: FLOAT64
+        description: "Available inventory units"
+        definition: "Verfügbare Lagereinheiten zum Zeitpunkt des Snapshots. Addierbar über SKUs für Gesamtlagerbestand."
+      - name: pending_quantity
+        type: FLOAT64
+        description: "Pending/reserved units"
+        definition: "Reservierte Einheiten für offene Bestellungen. Addierbar."
+      - name: item_condition
+        type: STRING
+        description: "New, Refurbished, Used*"
+        definition: "Zustand des Listings. In der Regel 'New' für neue Produkte."
+      - name: fulfillment_channel
+        type: STRING
+        description: "DEFAULT (FBM) or AMAZON_NA (FBA)"
+        definition: "'DEFAULT' = FBM (Versand durch Händler), 'AMAZON_NA' = FBA (Versand durch Amazon). Für FBA-Listings filtern: WHERE fulfillment_channel = 'AMAZON_NA'."
+      - name: open_date
+        type: STRING
+        description: "Listing creation date"
+        definition: "Datum wann dieses Listing erstellt wurde. STRING-Format. Nützlich für neue Produkt-Identifikation."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
+      - name: loaded_at
+        type: STRING
+        description: "UTC timestamp when loaded into BigQuery"
+        definition: "STRING-Timestamp im ISO-8601-Format. Nicht für Geschäftsanalysen nutzen — nur für Pipeline-Debugging."
 
   pma_inventory_fba:
     description: "FBA inventory levels across Amazon fulfillment centers"
@@ -336,23 +915,74 @@ views:
       - "What's our total FBA inventory value?"
     important: "This is a snapshot — always filter to the latest date. afn_fulfillable_quantity = sellable stock. When this reaches zero, the product is out of stock on Amazon."
     columns:
-      - { name: date, type: STRING, description: "Snapshot collection date YYYY-MM-DD" }
-      - { name: asin, type: STRING, description: "Product ASIN — JOIN key with other tables" }
-      - { name: sku, type: STRING, description: "Seller's SKU" }
-      - { name: fnsku, type: STRING, description: "Amazon's internal FBA identifier" }
-      - { name: product_name, type: STRING, description: "Product title" }
-      - { name: condition, type: STRING, description: "Item condition (usually New)" }
-      - { name: your_price, type: FLOAT64, description: "Current listing price" }
-      - { name: afn_fulfillable_quantity, type: FLOAT64, description: "Units ready to sell and ship (KEY METRIC)" }
-      - { name: afn_total_quantity, type: FLOAT64, description: "Total FBA units (all statuses)" }
-      - { name: afn_unsellable_quantity, type: FLOAT64, description: "Damaged/defective units" }
-      - { name: afn_reserved_quantity, type: FLOAT64, description: "Reserved for pending orders" }
-      - { name: afn_inbound_working_quantity, type: FLOAT64, description: "Inbound shipments being prepared" }
-      - { name: afn_inbound_shipped_quantity, type: FLOAT64, description: "In transit to Amazon" }
-      - { name: afn_inbound_receiving_quantity, type: FLOAT64, description: "Being received at warehouse" }
-      - { name: TotalSupplyQuantity, type: FLOAT64, description: "Total supply (fulfillable + inbound)" }
-      - { name: client_id, type: STRING }
-      - { name: loaded_at, type: STRING }
+      - name: date
+        type: STRING
+        description: "Snapshot collection date YYYY-MM-DD"
+        definition: "STRING-Datum des FBA-Inventory-Snapshots. Für aktuellen Stand immer auf neuestes Datum filtern: WHERE date = (SELECT MAX(date) FROM pma_inventory_fba WHERE client_id = '...')."
+      - name: asin
+        type: STRING
+        description: "Product ASIN — JOIN key with other tables"
+        definition: "10-stelliger Amazon-Produktidentifier. JOIN-Key mit pma_orders und rf_products."
+      - name: sku
+        type: STRING
+        description: "Seller's SKU"
+        definition: "Händler-interner Produktcode. Primärschlüssel auf Snapshot-Ebene. Kann sich ändern — für stabile JOINs asin bevorzugen."
+      - name: fnsku
+        type: STRING
+        description: "Amazon's internal FBA identifier"
+        definition: "Amazon-interner Barcode für FBA-Einheiten. Eindeutig pro SKU in einem FBA-Lager. Wird für Lagerbestandsverfolgung durch Amazon genutzt."
+      - name: product_name
+        type: STRING
+        description: "Product title"
+        definition: "Produkttitel zum Zeitpunkt des Snapshots. Kann von rf_products.title abweichen."
+      - name: condition
+        type: STRING
+        description: "Item condition (usually New)"
+        definition: "Zustand der FBA-Einheiten. In der Regel 'New'."
+      - name: your_price
+        type: FLOAT64
+        description: "Current listing price"
+        definition: "Aktueller Listingpreis. FLOAT64 — direkt für Berechnungen nutzbar."
+      - name: afn_fulfillable_quantity
+        type: FLOAT64
+        description: "Units ready to sell and ship (KEY METRIC)"
+        definition: "Verkäufliche und sofort versandfähige FBA-Einheiten. KEY METRIC — wenn = 0 ist das Produkt nicht auf Lager. Addierbar für Gesamtlagerbestand. Für Reorder-Alert: WHERE afn_fulfillable_quantity < [Schwellenwert]."
+      - name: afn_total_quantity
+        type: FLOAT64
+        description: "Total FBA units (all statuses)"
+        definition: "Summe aller FBA-Einheiten unabhängig vom Status (fulfillable + reserved + unsellable + inbound). Addierbar."
+      - name: afn_unsellable_quantity
+        type: FLOAT64
+        description: "Damaged/defective units"
+        definition: "Beschädigte oder defekte Einheiten die nicht verkauft werden können. Addierbar. Hohe Werte deuten auf Verpackungs- oder Qualitätsprobleme hin."
+      - name: afn_reserved_quantity
+        type: FLOAT64
+        description: "Reserved for pending orders"
+        definition: "Für offene Bestellungen reservierte Einheiten. Addierbar. Diese Einheiten sind bereits verkauft aber noch nicht versendet."
+      - name: afn_inbound_working_quantity
+        type: FLOAT64
+        description: "Inbound shipments being prepared"
+        definition: "Einheiten in Sendungen die noch vom Händler vorbereitet werden. Addierbar."
+      - name: afn_inbound_shipped_quantity
+        type: FLOAT64
+        description: "In transit to Amazon"
+        definition: "Einheiten die sich auf dem Weg zum Amazon-Fulfillment-Center befinden. Addierbar."
+      - name: afn_inbound_receiving_quantity
+        type: FLOAT64
+        description: "Being received at warehouse"
+        definition: "Einheiten die aktuell im Amazon-Lager eingebucht werden. Addierbar."
+      - name: TotalSupplyQuantity
+        type: FLOAT64
+        description: "Total supply (fulfillable + inbound)"
+        definition: "Gesamtversorgungsbestand: fulfillable + alle inbound Mengen. Addierbar. Für Reichweitenberechnung: TotalSupplyQuantity / durchschnittliche Tagesverkäufe."
+      - name: client_id
+        type: STRING
+        description: "ADP client identifier"
+        definition: "Nakoas interner Client-Key (z.B. 'client_07'). Wird beim Datenladen eingefügt. Immer vorhanden — kann als Filter genutzt werden."
+      - name: loaded_at
+        type: STRING
+        description: "UTC timestamp when loaded into BigQuery"
+        definition: "STRING-Timestamp im ISO-8601-Format. Nicht für Geschäftsanalysen nutzen — nur für Pipeline-Debugging."
 
 
 # ── JOIN Relationships ──────────────────────────────────────────────────

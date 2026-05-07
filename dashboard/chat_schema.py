@@ -44,7 +44,15 @@ def _format_columns(columns: list[dict]) -> str:
     lines = []
     for col in columns:
         desc = col.get("description", "")
-        suffix = f": {desc}" if desc else ""
+        defn = col.get("definition", "")
+        if desc and defn:
+            suffix = f": {desc} — {defn}"
+        elif desc:
+            suffix = f": {desc}"
+        elif defn:
+            suffix = f": {defn}"
+        else:
+            suffix = ""
         lines.append(f"- {col['name']} ({col['type']}){suffix}")
     return "\n".join(lines)
 
