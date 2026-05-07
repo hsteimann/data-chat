@@ -52,12 +52,15 @@ def _log_token_usage(phase: str, response: anthropic.types.Message) -> None:
     """Log Anthropic token usage with cache-hit metrics for cost monitoring.
 
     Cloud Logging filter: `jsonPayload.event="anthropic_usage"`.
+    The pipeline phase ("sql" / "interpret") is logged as `chat_phase` to
+    avoid collision with the engine's `phase` ContextVar (used for
+    request/collect/etc. workflow phases).
     """
     u = response.usage
     cache_read = getattr(u, "cache_read_input_tokens", 0) or 0
     cache_create = getattr(u, "cache_creation_input_tokens", 0) or 0
     logger.info(
-        "anthropic_usage phase=%s input=%d output=%d cache_read=%d cache_create=%d",
+        "anthropic_usage chat_phase=%s input=%d output=%d cache_read=%d cache_create=%d",
         phase,
         u.input_tokens,
         u.output_tokens,
@@ -65,7 +68,7 @@ def _log_token_usage(phase: str, response: anthropic.types.Message) -> None:
         cache_create,
         extra={
             "event": "anthropic_usage",
-            "phase": phase,
+            "chat_phase": phase,
             "input_tokens": u.input_tokens,
             "output_tokens": u.output_tokens,
             "cache_read_input_tokens": cache_read,
