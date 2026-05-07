@@ -298,6 +298,7 @@ def run_query(
             "row_count": 0,
             "date_range": f"{sd} → {ed}",
             "truncated": False,
+            "render_as": "text_only",
             "note": None,
         }
 
@@ -332,5 +333,6 @@ def run_query(
         "row_count": len(df),
         "date_range": f"{sd} → {ed}",
         "truncated": truncated,
+        "render_as": "plotly_artifact" if chart_spec else "text_only",
         "note": note,
     }
