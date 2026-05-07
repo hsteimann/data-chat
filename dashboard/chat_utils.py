@@ -1,47 +1,22 @@
-"""Shared utilities for chat-driven dashboard pages (SQL validation, widget spec extraction, Claude client)."""
+"""Shared utilities for chat-driven dashboard pages (widget spec extraction, Claude client).
+
+`validate_sql` is re-exported from the service layer (`adp.services.data_chat`)
+so the dashboard and the MCP server share a single implementation.
+"""
 
 import json
 import re
 
 import streamlit as st
 
+from adp.services.data_chat import validate_sql
 
-def validate_sql(sql: str) -> tuple[bool, str]:
-    """Validate SQL is a safe read-only query.
-
-    Returns (True, "") if valid, or (False, reason) if not.
-    """
-    sql_clean = sql.strip()
-    if not sql_clean:
-        return False, "Empty SQL query."
-
-    # Strip leading comments (-- or /* */)
-    sql_no_comments = re.sub(r"--[^\n]*", "", sql_clean)
-    sql_no_comments = re.sub(r"/\*.*?\*/", "", sql_no_comments, flags=re.DOTALL)
-    sql_upper = sql_no_comments.upper().strip()
-
-    # Must start with SELECT or WITH (CTE)
-    if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
-        return False, "Only SELECT/WITH queries are allowed."
-
-    # Strip string literals before keyword checking to avoid false positives
-    sql_no_strings = re.sub(r"'[^']*'", "''", sql_upper)
-    sql_no_strings = re.sub(r'"[^"]*"', '""', sql_no_strings)
-
-    dangerous = [
-        "INSERT", "UPDATE", "DELETE", "DROP", "TRUNCATE",
-        "ALTER", "CREATE", "GRANT", "REVOKE", "MERGE",
-    ]
-    for keyword in dangerous:
-        if re.search(rf"\b{keyword}\b", sql_no_strings):
-            return False, f"Query contains forbidden keyword: {keyword}"
-
-    # Catch unresolved template placeholders like {project}, {dataset}
-    placeholders = re.findall(r"\{(\w+)\}", sql_clean)
-    if placeholders:
-        return False, f"Query contains unresolved placeholders: {{{', '.join(placeholders)}}}"
-
-    return True, ""
+__all__ = [
+    "validate_sql",
+    "extract_widget_specs",
+    "clean_response",
+    "get_anthropic_client",
+]
 
 
 def extract_widget_specs(text: str) -> list[dict]:

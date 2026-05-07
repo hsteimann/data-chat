@@ -1,7 +1,5 @@
 """ADP Dashboard — AI-powered data exploration chat."""
 
-import json
-import re
 import sys
 import uuid
 from datetime import date, timedelta
@@ -15,13 +13,11 @@ _dashboard_dir = str(Path(__file__).resolve().parent.parent)
 if _dashboard_dir not in sys.path:
     sys.path.insert(0, _dashboard_dir)
 
-from chat_schema import (
-    build_sql_system_prompt,
-    SQL_USER_TEMPLATE,
-    INTERPRETATION_SYSTEM_PROMPT,
-    INTERPRETATION_USER_TEMPLATE,
+from adp.services.data_chat import (
+    generate_sql,
+    interpret_results,
+    validate_sql,
 )
-from chat_utils import get_anthropic_client, validate_sql
 from sidebar import (
     GCP_PROJECT,
     get_ads_clients,
@@ -127,112 +123,9 @@ def _build_interpretation_history(session: dict) -> list[dict]:
     return history[-MAX_HISTORY_TURNS:]
 
 
-def generate_sql(
-    client,
-    question: str,
-    dataset: str,
-    start_date: date,
-    end_date: date,
-    history: list[dict] | None = None,
-) -> str:
-    """Use Claude to generate a SQL query from natural language.
-
-    history: list of {"question": str, "sql": str} from previous turns.
-    The system prompt (schema + rules) is marked for prompt caching.
-    """
-    system_prompt = build_sql_system_prompt(GCP_PROJECT, dataset)
-
-    date_ctx = f"Date range: {start_date.isoformat()} to {end_date.isoformat()}"
-
-    # Build conversation messages from history + current question.
-    messages: list[dict] = []
-    for i, turn in enumerate(history or []):
-        user_text = f"{date_ctx}\n\nQuestion: {turn['question']}"
-        if i == 0:
-            # Attach cache_control to the system prompt on the first user message
-            # so subsequent turns benefit from the cache hit.
-            messages.append({
-                "role": "user",
-                "content": user_text,
-            })
-        else:
-            messages.append({"role": "user", "content": user_text})
-        messages.append({"role": "assistant", "content": turn["sql"]})
-
-    messages.append({
-        "role": "user",
-        "content": f"{date_ctx}\n\nQuestion: {question}",
-    })
-
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8192,
-        system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
-        messages=messages,
-    )
-
-    if response.stop_reason == "max_tokens":
-        raise ValueError(
-            "The generated SQL was too long and got truncated. "
-            "Try asking a simpler question or breaking it into smaller parts."
-        )
-
-    sql = response.content[0].text.strip()
-    sql = re.sub(r'^```sql\s*', '', sql, flags=re.MULTILINE)
-    sql = re.sub(r'^```\s*', '', sql, flags=re.MULTILINE)
-    sql = re.sub(r'\s*```$', '', sql)
-    return sql.strip()
-
-
-def interpret_results(
-    client,
-    question: str,
-    df: pd.DataFrame,
-    history: list[dict] | None = None,
-) -> tuple[str, dict | None]:
-    """Use Claude to interpret query results and suggest visualization.
-
-    history: list of {"question": str, "answer": str} from previous turns.
-    """
-    if len(df) > 50:
-        results_md = df.head(50).to_markdown(index=False)
-        results_md += f"\n\n... (showing first 50 of {len(df)} rows)"
-    else:
-        results_md = df.to_markdown(index=False)
-
-    messages: list[dict] = []
-    for turn in (history or []):
-        messages.append({"role": "user", "content": turn["question"]})
-        messages.append({"role": "assistant", "content": turn["answer"]})
-
-    messages.append({
-        "role": "user",
-        "content": INTERPRETATION_USER_TEMPLATE.format(
-            question=question,
-            results=results_md,
-            row_count=len(df),
-        ),
-    })
-
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=INTERPRETATION_SYSTEM_PROMPT,
-        messages=messages,
-    )
-
-    answer = response.content[0].text.strip()
-
-    chart_spec = None
-    chart_match = re.search(r'\{[^}]*"chart_type"[^}]*\}', answer)
-    if chart_match:
-        try:
-            chart_spec = json.loads(chart_match.group())
-            answer = answer.replace(chart_match.group(), "").strip()
-        except json.JSONDecodeError:
-            pass
-
-    return answer, chart_spec
+# SQL generation, result interpretation, and validation are imported from
+# `adp.services.data_chat` (Streamlit-free, also used by the MCP query_data
+# tool). Anthropic client + prompt caching live in the service layer.
 
 
 # ---------------------------------------------------------------------------
@@ -384,10 +277,12 @@ def _render_chat_tab(session: dict, dataset: str):
                 # ---- Phase 1: Generate SQL ----
                 if phase == "generate_sql":
                     with st.spinner("Generating SQL..."):
-                        anthropic_client = get_anthropic_client()
                         sql = generate_sql(
-                            anthropic_client, question,
-                            proc["dataset"], proc["start_date"], proc["end_date"],
+                            question=question,
+                            dataset=proc["dataset"],
+                            gcp_project=GCP_PROJECT,
+                            start_date=proc["start_date"],
+                            end_date=proc["end_date"],
                             history=_build_sql_history(session),
                         )
 
@@ -442,9 +337,9 @@ def _render_chat_tab(session: dict, dataset: str):
                     st.dataframe(df, width="stretch", hide_index=True, height=min(400, len(df) * 35 + 40))
 
                     with st.spinner("Analyzing results..."):
-                        anthropic_client = get_anthropic_client()
                         answer, chart_spec = interpret_results(
-                            anthropic_client, question, df,
+                            question=question,
+                            df=df,
                             history=_build_interpretation_history(session),
                         )
 
