@@ -273,18 +273,26 @@ def build_client_schema(gcp_project: str, dataset: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Prompt templates (these are prompt engineering logic, not data)
+# Prompt templates
 # ---------------------------------------------------------------------------
 
-SQL_GENERATION_PROMPT = """You are a SQL expert for Amazon data stored in BigQuery.
+def build_sql_system_prompt(gcp_project: str, dataset: str) -> str:
+    """Build the cacheable system prompt for SQL generation.
+
+    Contains the schema context and rules — everything that is stable
+    across turns in a session. Returned as a plain string; callers wrap
+    it in a cache_control block when calling the Anthropic API.
+    """
+    schema = build_client_schema(gcp_project, dataset)
+    return f"""You are a SQL expert for Amazon data stored in BigQuery.
 Given a user question, generate a SQL query to answer it.
 
-You are querying dataset `{dataset}`. Only the tables listed below exist for this client.
+You are querying dataset `{gcp_project}.{dataset}`. Only the tables listed below exist for this client.
 
 {schema}
 
 ## Rules
-1. Use fully qualified table names: `example-gcp-project.{dataset}.{{table}}`
+1. Use fully qualified table names: `{gcp_project}.{dataset}.{{table}}`
 2. Always include LIMIT (maximum 1000 rows)
 3. Prefer views (v_ads_*) over raw tables for ads data
 4. For date ranges, use BETWEEN with 'YYYY-MM-DD' format
@@ -296,27 +304,34 @@ You are querying dataset `{dataset}`. Only the tables listed below exist for thi
 10. For search term analysis or keyword questions, use `v_ads_searchterm_daily`
 11. JOINs across tables are allowed when the question requires it. Always JOIN on `date` plus the appropriate key column (see View Relationships). Use table aliases.
 12. If the user asks about data that is not available in the listed tables, say so instead of guessing.
+13. This is a multi-turn conversation. Use previous questions and SQL to understand follow-up requests."""
 
-## Current Context
-- Date range: {start_date} to {end_date}
 
-User question: {question}
-"""
+SQL_USER_TEMPLATE = "Date range: {start_date} to {end_date}\n\nQuestion: {question}"
 
-INTERPRETATION_PROMPT = """You analyzed Amazon advertising data. Here are the query results:
+INTERPRETATION_SYSTEM_PROMPT = """You are an Amazon advertising analyst. The user asked a question, a SQL query was run, and you received the results.
 
-{results}
-
-Row count: {row_count}
-
-Please provide:
-1. A concise, actionable answer to the user's question (2-4 sentences max)
-2. If a visualization would help understand the data, suggest ONE chart as JSON on its own line:
-   {{"chart_type": "bar|line|scatter|pie", "x": "column_name", "y": "column_name", "color": "column_name_optional"}}
+Provide:
+1. A concise, actionable answer (2-4 sentences max)
+2. If a visualization would help, suggest ONE chart as JSON on its own line:
+   {"chart_type": "bar|line|scatter|pie", "x": "column_name", "y": "column_name", "color": "column_name_optional"}
 
 Keep the response brief and focused on insights. Use bullet points for multiple findings.
-Do not repeat the raw data - the table is already displayed.
-"""
+Do not repeat the raw data — the table is already displayed to the user."""
+
+INTERPRETATION_USER_TEMPLATE = """Question: {question}
+
+Query results ({row_count} rows):
+{results}"""
+
+# Legacy template kept for any external callers.
+SQL_GENERATION_PROMPT = (
+    "You are a SQL expert for Amazon data stored in BigQuery.\n"
+    "Given a user question, generate a SQL query to answer it.\n\n"
+    "You are querying dataset `{dataset}`.\n\n{schema}\n\n"
+    "Date range: {start_date} to {end_date}\n\nUser question: {question}"
+)
+INTERPRETATION_PROMPT = INTERPRETATION_USER_TEMPLATE
 
 
 # ---------------------------------------------------------------------------
