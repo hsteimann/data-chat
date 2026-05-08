@@ -6,6 +6,7 @@ views:
   v_ads_summary_daily:
     description: "Client-level daily totals (aggregated across all campaigns)"
     grain: "One row per client per day — the big-picture numbers."
+    important: "Already aggregated at the daily grain — one row per client per day. Do NOT wrap metrics in SUM() for time-series queries (SELECT date, metric ORDER BY date) — use columns directly. Use SUM() only when collapsing across a non-date dimension (e.g., summing all campaigns into a client total). Always recalculate ratio KPIs (acos, roas, ctr, cpc) from summed components, never average them."
     use_for: "overall spend trends, total sales over time, daily/weekly/monthly performance summaries, comparing time periods, checking if spend or sales are up or down"
     typical_questions:
       - "How much did we spend last month?"
@@ -72,6 +73,7 @@ views:
   v_ads_campaign_daily:
     description: "Campaign-level daily performance metrics"
     grain: "One row per campaign per day."
+    important: "Already aggregated at the daily grain — one row per campaign per day. Do NOT wrap metrics in SUM() for time-series queries (SELECT date, metric ORDER BY date) — use columns directly. Use SUM() only when collapsing across a non-date dimension (e.g., summing all campaigns into a client total). Always recalculate ratio KPIs (acos, roas, ctr, cpc) from summed components, never average them."
     use_for: "identifying top/bottom campaigns, checking campaign budgets and status, analyzing spend distribution across campaigns, finding paused or underperforming campaigns"
     typical_questions:
       - "Which campaigns have the highest ACoS?"
@@ -155,6 +157,7 @@ views:
   v_ads_adgroup_daily:
     description: "Ad group level daily performance"
     grain: "One row per ad group per day."
+    important: "Already aggregated at the daily grain — one row per ad group per day. Do NOT wrap metrics in SUM() for time-series queries (SELECT date, metric ORDER BY date) — use columns directly. Use SUM() only when collapsing across a non-date dimension (e.g., summing all campaigns into a client total). Always recalculate ratio KPIs (acos, roas, ctr, cpc) from summed components, never average them."
     extra_context: "Ad groups sit inside campaigns and group related keywords/targets together."
     use_for: "finding which ad groups within a campaign perform best or worst, optimizing at the ad group level, comparing ad group strategies"
     typical_questions:
@@ -226,6 +229,7 @@ views:
   v_ads_asin_daily:
     description: "ASIN-level daily performance (product-level metrics)"
     grain: "One row per ASIN per campaign per day."
+    important: "Already aggregated at the daily grain — one row per ASIN per campaign per day. Do NOT wrap metrics in SUM() for time-series queries (SELECT date, metric ORDER BY date) — use columns directly. Use SUM() only when collapsing across a non-date dimension (e.g., summing all campaigns into a client total). Always recalculate ratio KPIs (acos, roas, ctr, cpc) from summed components, never average them."
     extra_context: "Each ASIN is a specific product. This view shows how each product performs in advertising."
     use_for: "identifying best/worst-selling products, finding products with high ad spend but low sales, product-level profitability analysis, comparing product performance across campaigns"
     typical_questions:
@@ -302,6 +306,7 @@ views:
   v_ads_searchterm_daily:
     description: "Search term performance — which customer search queries triggered ads"
     grain: "One row per search term per campaign per ad group per day."
+    important: "Already aggregated at the daily grain — one row per search term per campaign per ad group per day. Do NOT wrap metrics in SUM() for time-series queries (SELECT date, metric ORDER BY date) — use columns directly. Use SUM() only when collapsing across a non-date dimension (e.g., summing all campaigns into a client total). Always recalculate ratio KPIs (acos, roas, ctr, cpc) from summed components, never average them."
     extra_context: "This is the most granular view. It shows what customers actually typed into Amazon search and how those searches performed."
     use_for: "keyword research, finding high-performing or wasted search terms, negative keyword candidates, match type analysis, understanding customer search behavior"
     typical_questions:
@@ -546,7 +551,7 @@ views:
       - "What's our Buy Box percentage trend?"
       - "What's the conversion rate over the last 30 days?"
       - "How many units were refunded this month?"
-    important: "Averages and percentages (refundRate, buyBoxPercentage, unitSessionPercentage, etc.) are pre-computed daily values. Do NOT sum them across days — recalculate from underlying totals. For example, weekly conversion rate = SUM(sales_totalOrderItems) / SUM(traffic_sessions) * 100."
+    important: "Already aggregated at the daily grain — one row per marketplace per day. Do NOT wrap metrics in SUM() for time-series queries (SELECT date, metric ORDER BY date) — use columns directly. Use SUM() only when collapsing across a non-date dimension (e.g., summing all campaigns into a client total). Always recalculate ratio KPIs (acos, roas, ctr, cpc) from summed components, never average them. Additionally: averages and percentages (refundRate, buyBoxPercentage, unitSessionPercentage, etc.) are pre-computed daily values — recalculate from underlying totals when aggregating (e.g., weekly conversion rate = SUM(sales_totalOrderItems) / SUM(traffic_sessions) * 100)."
     columns:
       - name: date
         type: STRING
@@ -653,6 +658,7 @@ views:
     description: "Daily per-child-ASIN sales and traffic from Seller Central (includes B2B breakdowns)"
     grain: "One row per child ASIN per day."
     is_raw_table: true
+    important: "Already aggregated at the daily grain — one row per child ASIN per day. Do NOT wrap metrics in SUM() for time-series queries (SELECT date, metric ORDER BY date) — use columns directly. Use SUM() only when collapsing across a non-date dimension (e.g., summing all campaigns into a client total). Always recalculate ratio KPIs (acos, roas, ctr, cpc) from summed components, never average them."
     extra_context: "Child-ASIN level with B2B breakdowns and refund details not in the by_asin report. Use for B2B analysis and refund tracking."
     use_for: "B2B sales breakdown, refund rate analysis per child ASIN, shipped vs ordered comparison, detailed traffic by device type with B2B split"
     typical_questions:
@@ -1124,3 +1130,4 @@ ai_warnings:
   - "Use SAFE_DIVIDE for calculations to avoid division by zero"
   - "Date format is YYYY-MM-DD"
   - "Each view has different columns. NEVER use UNION ALL across different views (e.g., do NOT combine v_ads_summary_daily with v_ads_campaign_daily). Only UNION ALL the same view across different datasets."
+  - "Views named v_*_daily and pma_*_daily are pre-aggregated. For time-series queries use columns directly without SUM(). Use SUM() only when aggregating across a non-date dimension."
