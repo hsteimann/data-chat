@@ -24,6 +24,7 @@ from typing import Any
 
 import anthropic
 import pandas as pd
+from google.api_core.exceptions import BadRequest
 from google.cloud import bigquery
 
 from adp.secrets import get_secret
@@ -84,6 +85,8 @@ def generate_sql(
     start_date: date,
     end_date: date,
     history: list[dict] | None = None,  # [{"question": str, "sql": str}]
+    previous_sql: str | None = None,  # für Retry: fehlgeschlagenes SQL
+    bq_error: str | None = None,  # für Retry: BQ-Fehlermeldung
 ) -> str:
     """Generate BQ SQL via Claude with prompt caching on the system prompt."""
     client = _anthropic_client()
@@ -97,6 +100,13 @@ def generate_sql(
         )
         messages.append({"role": "assistant", "content": turn["sql"]})
     messages.append({"role": "user", "content": f"{date_ctx}\n\nQuestion: {question}"})
+
+    if previous_sql and bq_error:
+        messages.append({"role": "assistant", "content": previous_sql})
+        messages.append({
+            "role": "user",
+            "content": f"The previous query failed with this BigQuery error:\n{bq_error}\n\nPlease fix the SQL.",
+        })
 
     response = client.messages.create(
         model=_MODEL,
@@ -282,6 +292,36 @@ def run_query(
 
     try:
         df, job_id = execute_query(sql, gcp_project)
+    except BadRequest as e:
+        bq_error_msg = str(e)
+        logger.warning(
+            "bq_query_failed_retrying client=%s error=%s",
+            client_id,
+            bq_error_msg[:200],
+        )
+        try:
+            sql = generate_sql(
+                question, dataset, gcp_project, sd, ed,
+                history=sql_history,
+                previous_sql=sql,
+                bq_error=bq_error_msg,
+            )
+        except Exception as gen_err:
+            logger.exception("sql_retry_generation_failed client=%s", client_id)
+            return {"error": f"SQL retry generation failed: {gen_err}", "sql": sql}
+
+        valid, reason = validate_sql(sql)
+        if not valid:
+            return {"error": f"Invalid SQL after retry: {reason}", "sql": sql}
+        if "LIMIT" not in sql.upper():
+            sql = sql.rstrip(";") + " LIMIT 1000"
+
+        try:
+            df, job_id = execute_query(sql, gcp_project)
+        except Exception as e2:
+            logger.exception("bq_query_failed_after_retry client=%s", client_id)
+            return {"error": f"Query failed after retry: {e2}", "sql": sql}
+
     except Exception as e:
         logger.exception("bq_query_failed client=%s", client_id)
         return {"error": f"Query failed: {e}", "sql": sql}
