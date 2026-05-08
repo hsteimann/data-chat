@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 from datetime import date, timedelta
 from functools import lru_cache
 from typing import Any
@@ -264,6 +265,8 @@ def run_query(
     gcp_project = settings.gcp_project
     dataset = cfg.bq_dataset
 
+    query_id = str(uuid.uuid4())
+
     sql_history = [
         {"question": h["question"], "sql": h["sql"]}
         for h in (history or [])
@@ -281,11 +284,13 @@ def run_query(
         )
     except Exception as e:
         logger.exception("sql_generation_failed client=%s", client_id)
-        return {"error": f"SQL generation failed: {e}"}
+        _log_query_safe(query_id, client_id, question, None, False, None, None)
+        return {"error": f"SQL generation failed: {e}", "query_id": query_id}
 
     valid, reason = validate_sql(sql)
     if not valid:
-        return {"error": f"Invalid SQL: {reason}", "sql": sql}
+        _log_query_safe(query_id, client_id, question, sql, False, None, None)
+        return {"error": f"Invalid SQL: {reason}", "sql": sql, "query_id": query_id}
 
     if "LIMIT" not in sql.upper():
         sql = sql.rstrip(";") + " LIMIT 1000"
@@ -308,11 +313,13 @@ def run_query(
             )
         except Exception as gen_err:
             logger.exception("sql_retry_generation_failed client=%s", client_id)
-            return {"error": f"SQL retry generation failed: {gen_err}", "sql": sql}
+            _log_query_safe(query_id, client_id, question, sql, False, None, None)
+            return {"error": f"SQL retry generation failed: {gen_err}", "sql": sql, "query_id": query_id}
 
         valid, reason = validate_sql(sql)
         if not valid:
-            return {"error": f"Invalid SQL after retry: {reason}", "sql": sql}
+            _log_query_safe(query_id, client_id, question, sql, False, None, None)
+            return {"error": f"Invalid SQL after retry: {reason}", "sql": sql, "query_id": query_id}
         if "LIMIT" not in sql.upper():
             sql = sql.rstrip(";") + " LIMIT 1000"
 
@@ -320,13 +327,16 @@ def run_query(
             df, job_id = execute_query(sql, gcp_project)
         except Exception as e2:
             logger.exception("bq_query_failed_after_retry client=%s", client_id)
-            return {"error": f"Query failed after retry: {e2}", "sql": sql}
+            _log_query_safe(query_id, client_id, question, sql, False, None, None)
+            return {"error": f"Query failed after retry: {e2}", "sql": sql, "query_id": query_id}
 
     except Exception as e:
         logger.exception("bq_query_failed client=%s", client_id)
-        return {"error": f"Query failed: {e}", "sql": sql}
+        _log_query_safe(query_id, client_id, question, sql, False, None, None)
+        return {"error": f"Query failed: {e}", "sql": sql, "query_id": query_id}
 
     if df.empty:
+        _log_query_safe(query_id, client_id, question, sql, True, 0, "text_only")
         return {
             "client_id": client_id,
             "client_name": cfg.name,
@@ -340,13 +350,15 @@ def run_query(
             "truncated": False,
             "render_as": "text_only",
             "note": None,
+            "query_id": query_id,
         }
 
     try:
         answer, chart_spec = interpret_results(question, df, history=interp_history)
     except Exception as e:
         logger.exception("interpretation_failed client=%s", client_id)
-        return {"error": f"Interpretation failed: {e}", "sql": sql}
+        _log_query_safe(query_id, client_id, question, sql, True, len(df), None)
+        return {"error": f"Interpretation failed: {e}", "sql": sql, "query_id": query_id}
 
     truncated = len(df) > MAX_DATA_ROWS
     rows = df.head(MAX_DATA_ROWS).to_dict(orient="records")
@@ -362,6 +374,9 @@ def run_query(
             f"Das Chart sollte aggregierte Sicht zeigen oder die Frage präziser eingegrenzt werden."
         )
 
+    render_as = "plotly_artifact" if chart_spec else "text_only"
+    _log_query_safe(query_id, client_id, question, sql, True, len(df), render_as)
+
     return {
         "client_id": client_id,
         "client_name": cfg.name,
@@ -373,6 +388,30 @@ def run_query(
         "row_count": len(df),
         "date_range": f"{sd} → {ed}",
         "truncated": truncated,
-        "render_as": "plotly_artifact" if chart_spec else "text_only",
+        "render_as": render_as,
         "note": note,
+        "query_id": query_id,
     }
+
+
+def _log_query_safe(
+    query_id: str,
+    client_slug: str,
+    question: str,
+    sql: str | None,
+    sql_success: bool,
+    row_count: int | None,
+    render_as: str | None,
+) -> None:
+    """Call log_query without blocking the caller — exceptions are swallowed inside log_query."""
+    from adp.services.feedback import log_query
+    log_query(
+        query_id=query_id,
+        client_slug=client_slug,
+        question=question,
+        generated_sql=sql,
+        sql_success=sql_success,
+        row_count=row_count,
+        render_as=render_as,
+        source="mcp",
+    )

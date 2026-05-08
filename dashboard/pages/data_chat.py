@@ -18,6 +18,7 @@ from adp.services.data_chat import (
     interpret_results,
     validate_sql,
 )
+from adp.services.feedback import log_query, submit_feedback
 from sidebar import (
     GCP_PROJECT,
     get_ads_clients,
@@ -257,6 +258,45 @@ def _render_chat_tab(session: dict, dataset: str):
                     if message.get("chart_spec"):
                         render_chart(cached_df, message["chart_spec"])
 
+            # Feedback buttons for assistant messages that have a query_id
+            if message["role"] == "assistant" and message.get("query_id"):
+                qid = message["query_id"]
+                given_key = f"feedback_given_{qid}"
+                pending_key = f"feedback_pending_{qid}"
+
+                if st.session_state.get(given_key):
+                    st.caption("Danke für dein Feedback ✓")
+                elif st.session_state.get(pending_key):
+                    failure_cat = st.radio(
+                        "Was war falsch?",
+                        options=["wrong_numbers", "wrong_timeframe", "wrong_metric",
+                                 "wrong_scope", "wrong_viz", "no_data", "other"],
+                        key=f"fc_{qid}",
+                        horizontal=True,
+                    )
+                    comment = st.text_input(
+                        "Kommentar (optional)",
+                        key=f"comment_{qid}",
+                        max_chars=300,
+                    )
+                    if st.button("Absenden", key=f"fb_submit_{qid}"):
+                        submit_feedback(qid, rating=-1, failure_category=failure_cat,
+                                        comment=comment or None, source="dashboard_click")
+                        st.session_state[given_key] = True
+                        st.session_state.pop(pending_key, None)
+                        st.rerun()
+                else:
+                    col1, col2, _ = st.columns([1, 1, 8])
+                    with col1:
+                        if st.button("👍", key=f"thumb_up_{qid}"):
+                            submit_feedback(qid, rating=+1, source="dashboard_click")
+                            st.session_state[given_key] = "positive"
+                            st.rerun()
+                    with col2:
+                        if st.button("👎", key=f"thumb_down_{qid}"):
+                            st.session_state[pending_key] = True
+                            st.rerun()
+
     # --- Processing pipeline (state machine) ---
     if is_processing:
         proc = st.session_state[proc_key]
@@ -289,9 +329,21 @@ def _render_chat_tab(session: dict, dataset: str):
                     is_valid, error_msg = validate_sql(sql)
                     if not is_valid:
                         st.error(f"Invalid query: {error_msg}")
+                        log_query(
+                            query_id=proc["query_id"],
+                            client_slug=proc["dataset"],
+                            question=question,
+                            generated_sql=sql,
+                            sql_success=False,
+                            row_count=None,
+                            render_as=None,
+                            source="dashboard",
+                            session_id=session_id,
+                        )
                         session["messages"].append({
                             "role": "assistant",
                             "content": f"I couldn't generate a safe query: {error_msg}",
+                            "query_id": proc["query_id"],
                         })
                         st.session_state.pop(proc_key, None)
                         st.rerun()
@@ -314,10 +366,22 @@ def _render_chat_tab(session: dict, dataset: str):
                     if df.empty:
                         answer = "The query returned no results. Try adjusting your date range or question."
                         st.markdown(answer)
+                        log_query(
+                            query_id=proc["query_id"],
+                            client_slug=proc["dataset"],
+                            question=question,
+                            generated_sql=sql,
+                            sql_success=True,
+                            row_count=0,
+                            render_as="text_only",
+                            source="dashboard",
+                            session_id=session_id,
+                        )
                         session["messages"].append({
                             "role": "assistant",
                             "content": answer,
                             "sql": sql,
+                            "query_id": proc["query_id"],
                         })
                         st.session_state.pop(proc_key, None)
                         st.rerun()
@@ -348,11 +412,24 @@ def _render_chat_tab(session: dict, dataset: str):
                     if chart_spec:
                         render_chart(df, chart_spec)
 
+                    render_as = "plotly_artifact" if chart_spec else "text_only"
+                    log_query(
+                        query_id=proc["query_id"],
+                        client_slug=proc["dataset"],
+                        question=question,
+                        generated_sql=sql,
+                        sql_success=True,
+                        row_count=len(df),
+                        render_as=render_as,
+                        source="dashboard",
+                        session_id=session_id,
+                    )
                     session["messages"].append({
                         "role": "assistant",
                         "content": answer,
                         "sql": sql,
                         "chart_spec": chart_spec,
+                        "query_id": proc["query_id"],
                     })
                     st.session_state.pop(proc_key, None)
                     st.rerun()
@@ -363,6 +440,7 @@ def _render_chat_tab(session: dict, dataset: str):
                 session["messages"].append({
                     "role": "assistant",
                     "content": error_msg,
+                    "query_id": proc.get("query_id"),
                 })
                 st.session_state.pop(proc_key, None)
 
@@ -382,6 +460,7 @@ def _render_chat_tab(session: dict, dataset: str):
             "end_date": end_date,
             "sql": None,
             "bq_job_id": None,
+            "query_id": uuid.uuid4().hex,
         }
         st.rerun()
 

@@ -993,6 +993,66 @@ views:
 
 # ── JOIN Relationships ──────────────────────────────────────────────────
 
+  data_chat_feedback_summary:
+    description: "Daily summary of Data Chat query quality and user feedback ratings"
+    grain: "One row per date per client_slug per source."
+    is_raw_table: false
+    system_view: true
+    dataset: "adp_tracking"
+    extra_context: "Aggregated from the data_chat_feedback table in adp_tracking. Tracks how often users rate answers positively or negatively and what failure categories are reported."
+    use_for: "monitoring Data Chat answer quality, identifying which failure categories are most common, tracking feedback rate over time, comparing MCP vs dashboard quality"
+    typical_questions:
+      - "What is the satisfaction rate for Data Chat this week?"
+      - "Which failure categories are most common?"
+      - "How many queries were rated this month?"
+    important: "This view is in the adp_tracking dataset, not the client-specific dataset. Query it as `example-gcp-project.adp_tracking.data_chat_feedback_summary`. No client_id filter needed — client_slug column identifies the client."
+    columns:
+      - name: date
+        type: DATE
+        description: "Date of the queries"
+      - name: client_slug
+        type: STRING
+        description: "Client identifier"
+      - name: source
+        type: STRING
+        description: "Query source: dashboard or mcp"
+      - name: total_queries
+        type: INT64
+        description: "Total queries on that date"
+      - name: rated_queries
+        type: INT64
+        description: "Queries that received a thumbs up or down"
+      - name: feedback_rate
+        type: FLOAT64
+        description: "Share of queries that were rated (0-1)"
+      - name: positive
+        type: INT64
+        description: "Thumbs-up count"
+      - name: negative
+        type: INT64
+        description: "Thumbs-down count"
+      - name: satisfaction_rate
+        type: FLOAT64
+        description: "Share of rated queries that were positive (0-1)"
+      - name: cat_wrong_numbers
+        type: INT64
+        description: "Negative feedback: wrong numbers"
+      - name: cat_wrong_timeframe
+        type: INT64
+        description: "Negative feedback: wrong timeframe"
+      - name: cat_wrong_metric
+        type: INT64
+        description: "Negative feedback: wrong metric"
+      - name: cat_wrong_scope
+        type: INT64
+        description: "Negative feedback: wrong scope"
+      - name: cat_wrong_viz
+        type: INT64
+        description: "Negative feedback: wrong visualization"
+      - name: cat_no_data
+        type: INT64
+        description: "Negative feedback: no data returned"
+
 join_relationships:
   - view_a: v_ads_campaign_daily
     view_b: v_ads_searchterm_daily
