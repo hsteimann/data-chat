@@ -5,19 +5,17 @@ Reasoning consumers (Insights, Data Chat, Alerts, Feedback) must go through
 import surface is how design principle 4 of the data-context plan is enforced
 mechanically — see ``docs/plan-data-context-api.md``.
 
-This test is currently expected to fail: at the start of Phase 1a none of the
-consumers have been migrated yet, and ``adp.services.data_chat_schema``
-explicitly imports ``RegistryService``. The migration happens in Phase 1b/1c.
-The xfail keeps the gate visible in the test report so we notice the moment
-it flips green.
+Phase 1c flipped this from xfail to a hard assertion: ``data_chat_schema``
+was the lone offender at the start of Phase 1a, and it now goes through
+``adp.data_context``. The other listed consumers (Insights, Alerts, Feedback)
+already don't import ``RegistryService``; their Phase 1b migration adds
+``adp.data_context`` calls, which keeps this gate green.
 """
 
 from __future__ import annotations
 
 import ast
 from pathlib import Path
-
-import pytest
 
 # Source files that constitute the reasoning layer. Anything that takes a
 # `client_id` and produces text/charts/insights belongs here.
@@ -50,14 +48,6 @@ def _imports_registry(file_path: Path) -> bool:
     return False
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Enabled after Phase 1b/1c migration. data_chat_schema.py still "
-        "imports RegistryService directly until it's switched to "
-        "adp.data_context."
-    ),
-    strict=False,
-)
 def test_reasoning_consumers_do_not_import_registry():
     repo_root = Path(__file__).resolve().parents[1]
     offenders: list[str] = []

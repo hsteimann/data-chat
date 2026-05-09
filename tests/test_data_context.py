@@ -18,16 +18,22 @@ import pytest
 from adp import data_context
 from adp.data_context import (
     SCOPES,
+    get_ai_warnings,
     get_cross_source_warnings,
+    get_join_notes,
+    get_join_relationships,
     get_kpi,
     get_kpis,
+    get_query_examples,
     get_view_metadata,
     list_views,
     reload,
 )
 from adp.models.data_context import (
     CrossSourceWarning,
+    JoinRelationship,
     KpiDefinition,
+    QueryExample,
     ViewMetadata,
 )
 
@@ -324,3 +330,71 @@ class TestEmptyResults:
 
 def test_scopes_tuple_is_canonical():
     assert SCOPES == ("ads", "rainforest", "sc")
+
+
+# ---------------------------------------------------------------------------
+# JOIN relationships, query examples, AI warnings (Phase 1c additions)
+# ---------------------------------------------------------------------------
+
+
+class TestJoinRelationships:
+    def test_returns_list_of_models(self):
+        joins = get_join_relationships()
+        assert isinstance(joins, list)
+        assert joins, "data_catalog.yaml ships with several join_relationships"
+        for rel in joins:
+            assert isinstance(rel, JoinRelationship)
+            assert rel.view_a
+            assert rel.view_b
+            assert rel.keys
+
+    def test_snapshot_campaign_searchterm_join(self):
+        joins = get_join_relationships()
+        match = next(
+            (
+                r
+                for r in joins
+                if r.view_a == "v_ads_campaign_daily"
+                and r.view_b == "v_ads_searchterm_daily"
+            ),
+            None,
+        )
+        assert match is not None
+        assert "date" in match.keys
+
+    def test_join_notes_are_strings(self):
+        notes = get_join_notes()
+        assert isinstance(notes, list)
+        assert notes
+        assert all(isinstance(n, str) for n in notes)
+
+
+class TestQueryExamples:
+    def test_returns_list_of_models(self):
+        examples = get_query_examples()
+        assert isinstance(examples, list)
+        assert examples, "data_catalog.yaml ships with example queries"
+        for ex in examples:
+            assert isinstance(ex, QueryExample)
+            assert ex.name
+            assert "SELECT" in ex.sql.upper()
+
+    def test_snapshot_first_example_name(self):
+        examples = get_query_examples()
+        names = [ex.name for ex in examples]
+        assert "Single client query" in names
+
+
+class TestAiWarnings:
+    def test_returns_list_of_strings(self):
+        warnings = get_ai_warnings()
+        assert isinstance(warnings, list)
+        assert warnings
+        assert all(isinstance(w, str) for w in warnings)
+
+    def test_snapshot_contains_known_warning(self):
+        warnings = get_ai_warnings()
+        # ROAS-as-ratio warning is a stable anchor.
+        joined = "\n".join(warnings)
+        assert "ROAS" in joined
+        assert "SAFE_DIVIDE" in joined

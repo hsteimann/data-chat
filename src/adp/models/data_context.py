@@ -85,3 +85,30 @@ class ViewMetadata(BaseModel):
     typical_questions: list[str] = []
     extra_context: str | None = None
     columns: list[ColumnMetadata]
+
+
+class JoinRelationship(BaseModel):
+    """A structured JOIN hint between two queryable entries.
+
+    Mirrors `data_catalog.yaml: join_relationships:`. ``keys`` is a list of
+    plain JOIN-key descriptors as authored in the catalog (often plain column
+    names like ``["campaign_id", "date"]`` but occasionally free-form strings
+    like ``"adgroup_id = ad_group_id"`` or bridging notes — kept verbatim so
+    consumers can render them as-is).
+    """
+
+    view_a: str
+    view_b: str
+    keys: list[str]
+
+
+class QueryExample(BaseModel):
+    """A canonical SQL snippet from `data_catalog.yaml: query_examples:`.
+
+    Stored verbatim with the original dataset placeholder (typically
+    ``adp_client_07``); consumers substitute the active client dataset
+    when rendering.
+    """
+
+    name: str
+    sql: str

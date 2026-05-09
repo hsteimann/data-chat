@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from adp.clients import load_clients
-from adp.data_context._catalog import load_views
+from adp.data_context._catalog import load_catalog
 from adp.data_context._scope import (
     SCOPES,
     assert_known_scope,
@@ -40,7 +40,9 @@ from adp.data_context._scope import (
 from adp.models.data_context import (
     ColumnMetadata,
     CrossSourceWarning,
+    JoinRelationship,
     KpiDefinition,
+    QueryExample,
     ViewMetadata,
 )
 from adp.services.data_sources import get_tables_for_sources
@@ -50,7 +52,9 @@ __all__ = [
     # Pydantic models (re-exported so consumers don't reach into adp.models)
     "ColumnMetadata",
     "CrossSourceWarning",
+    "JoinRelationship",
     "KpiDefinition",
+    "QueryExample",
     "ViewMetadata",
     # Public API
     "list_views",
@@ -58,6 +62,10 @@ __all__ = [
     "get_kpi",
     "get_kpis",
     "get_cross_source_warnings",
+    "get_join_relationships",
+    "get_join_notes",
+    "get_query_examples",
+    "get_ai_warnings",
     "reload",
 ]
 
@@ -72,6 +80,10 @@ class _Bundle:
     views: dict[str, ViewMetadata]
     kpis: dict[str, KpiDefinition]
     warnings: list[CrossSourceWarning]
+    join_relationships: list[JoinRelationship]
+    join_notes: list[str]
+    query_examples: list[QueryExample]
+    ai_warnings: list[str]
 
 
 @lru_cache(maxsize=1)
@@ -79,11 +91,12 @@ def _bundle() -> _Bundle:
     """Load all reasoning context once. Idempotent within a process.
 
     Composition:
-    - Views + columns from ``data_catalog.yaml`` via ``CatalogLoader``.
+    - Views, joins, query examples, AI warnings from ``data_catalog.yaml``
+      via the catalog loader.
     - KPIs and cross-source warnings from ``RegistryService`` (translated into
       the reasoning-typed models from ``adp.models.data_context``).
     """
-    views = load_views()
+    catalog = load_catalog()
     registry = RegistryService(load_schemas=False)
 
     kpis = {
@@ -93,7 +106,15 @@ def _bundle() -> _Bundle:
         CrossSourceWarning(id=w.id, fields=list(w.fields), warning=w.warning)
         for w in registry.registry.cross_source_warnings
     ]
-    return _Bundle(views=views, kpis=kpis, warnings=warnings)
+    return _Bundle(
+        views=catalog.views,
+        kpis=kpis,
+        warnings=warnings,
+        join_relationships=catalog.join_relationships,
+        join_notes=catalog.join_notes,
+        query_examples=catalog.query_examples,
+        ai_warnings=catalog.ai_warnings,
+    )
 
 
 def _kpi_from_registry(key: str, k) -> KpiDefinition:
@@ -344,6 +365,49 @@ def get_cross_source_warnings(
                 continue
         out.append(w)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Public API — JOIN relationships, query examples, AI warnings
+#
+# These are catalog-wide and intentionally unfiltered (per plan, Phase 1c):
+# join/example/warning *content* is global — clients differ in *which* tables
+# exist, but that "existing tables" filtering is a Data Chat concern (BQ
+# introspection) and stays in the consumer.
+# ---------------------------------------------------------------------------
+
+
+def get_join_relationships() -> list[JoinRelationship]:
+    """Return all structured JOIN hints from ``data_catalog.yaml``."""
+    return list(_bundle().join_relationships)
+
+
+def get_join_notes() -> list[str]:
+    """Return free-form JOIN notes from ``data_catalog.yaml``.
+
+    These complement ``get_join_relationships`` with prose like
+    "v_ads_asin_daily does NOT have campaign_id — use campaign_name".
+    """
+    return list(_bundle().join_notes)
+
+
+def get_query_examples() -> list[QueryExample]:
+    """Return canonical SQL examples from ``data_catalog.yaml``.
+
+    SQL strings are returned verbatim (with the original ``adp_client_07``
+    placeholder); consumers substitute the active client dataset.
+    """
+    return list(_bundle().query_examples)
+
+
+def get_ai_warnings() -> list[str]:
+    """Return global AI warnings from ``data_catalog.yaml``.
+
+    These are prose strings ("ROAS is a ratio", "always use SAFE_DIVIDE"…).
+    They are catalog-wide and not filtered by client/scope — keep filtering
+    in the consumer when relevant.
+    """
+    return list(_bundle().ai_warnings)
 
 
 # Surface the canonical scope tuple for callers that want to introspect

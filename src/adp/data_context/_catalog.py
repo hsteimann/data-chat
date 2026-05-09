@@ -10,22 +10,38 @@ are forbidden by design principle 6 in the plan.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from adp.config import settings
 from adp.data_context._scope import view_source_label
-from adp.models.data_context import ColumnMetadata, ViewMetadata
+from adp.models.data_context import (
+    ColumnMetadata,
+    JoinRelationship,
+    QueryExample,
+    ViewMetadata,
+)
 
 
-def load_views(catalog_path: Path | None = None) -> dict[str, ViewMetadata]:
-    """Load all views from ``data_catalog.yaml`` as ``ViewMetadata`` objects.
+@dataclass(frozen=True)
+class CatalogPayload:
+    """All data extracted from ``data_catalog.yaml``.
 
-    Parameters
-    ----------
-    catalog_path:
-        Override path. Defaults to ``settings.data_catalog_file``.
+    Single dataclass so the bundle loader can read the YAML once and produce
+    every public list/dict in one pass.
+    """
+
+    views: dict[str, ViewMetadata]
+    join_relationships: list[JoinRelationship]
+    join_notes: list[str]
+    query_examples: list[QueryExample]
+    ai_warnings: list[str]
+
+
+def load_catalog(catalog_path: Path | None = None) -> CatalogPayload:
+    """Load every section of ``data_catalog.yaml`` into typed containers.
 
     Raises
     ------
@@ -34,6 +50,43 @@ def load_views(catalog_path: Path | None = None) -> dict[str, ViewMetadata]:
     ValueError
         If the YAML is malformed, empty, or has no ``views:`` section.
     """
+    raw = _read_yaml(catalog_path)
+
+    views: dict[str, ViewMetadata] = {}
+    for name, view_raw in raw["views"].items():
+        views[name] = _parse_view(name, view_raw)
+
+    joins = [
+        JoinRelationship(
+            view_a=rel["view_a"],
+            view_b=rel["view_b"],
+            keys=[str(k) for k in rel.get("keys", []) or []],
+        )
+        for rel in raw.get("join_relationships", []) or []
+    ]
+    join_notes = [str(n) for n in raw.get("join_notes", []) or []]
+
+    examples = [
+        QueryExample(name=ex["name"], sql=ex["sql"])
+        for ex in raw.get("query_examples", []) or []
+    ]
+    ai_warnings = [str(w) for w in raw.get("ai_warnings", []) or []]
+
+    return CatalogPayload(
+        views=views,
+        join_relationships=joins,
+        join_notes=join_notes,
+        query_examples=examples,
+        ai_warnings=ai_warnings,
+    )
+
+
+def load_views(catalog_path: Path | None = None) -> dict[str, ViewMetadata]:
+    """Backwards-compatible shim. New code should use ``load_catalog``."""
+    return load_catalog(catalog_path).views
+
+
+def _read_yaml(catalog_path: Path | None) -> dict:
     path = catalog_path or settings.data_catalog_file
 
     try:
@@ -48,11 +101,7 @@ def load_views(catalog_path: Path | None = None) -> dict[str, ViewMetadata]:
         raise ValueError(f"Empty data catalog file: {path}")
     if "views" not in raw or not isinstance(raw["views"], dict):
         raise ValueError(f"Data catalog at {path} has no 'views:' section.")
-
-    views: dict[str, ViewMetadata] = {}
-    for name, view_raw in raw["views"].items():
-        views[name] = _parse_view(name, view_raw)
-    return views
+    return raw
 
 
 def _parse_view(name: str, raw: dict) -> ViewMetadata:

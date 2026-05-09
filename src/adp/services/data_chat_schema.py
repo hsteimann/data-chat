@@ -1,11 +1,21 @@
 """BigQuery schema context for Claude AI Data Chat.
 
-Builds the schema context dynamically from config/data_catalog.yaml,
-filtered to the tables/views that actually exist for the selected client.
-Falls back to a static string if the YAML is not available.
+Builds the schema context dynamically by reading the queryable layer through
+the ``adp.data_context`` API and filtering it down to what physically exists
+in the client's BigQuery dataset.
 
-This module is Streamlit-free — used by both the Streamlit dashboard
-and the MCP server.
+This module is Streamlit-free — used by both the Streamlit dashboard and the
+MCP server.
+
+Phase 1c (see ``docs/plan-data-context-api.md``):
+
+- All catalog/registry access goes through ``adp.data_context`` — no direct
+  ``yaml.safe_load`` on ``data_catalog.yaml`` and no ``RegistryService``.
+- The previous ``_FALLBACK_SCHEMA_CONTEXT`` string has been removed: a
+  missing catalog now raises (fail-loud, plan F6). If the catalog is gone,
+  much more is broken than a chart, and a hardcoded fallback drifted silently.
+- "Existing tables filtering" (which views the BQ dataset actually has) is
+  kept here because it's BQ introspection, not metadata.
 """
 
 from __future__ import annotations
@@ -16,8 +26,18 @@ from threading import Lock
 from cachetools import TTLCache, cached
 from google.cloud import bigquery
 
-from adp.config import _resolve_config_dir
-from adp.services.registry import RegistryService
+from adp.data_context import (
+    JoinRelationship,
+    QueryExample,
+    ViewMetadata,
+    get_ai_warnings,
+    get_join_notes,
+    get_join_relationships,
+    get_kpis,
+    get_query_examples,
+    get_view_metadata,
+    list_views,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,35 +55,15 @@ _kpi_lock = Lock()
 
 
 # ---------------------------------------------------------------------------
-# Catalog loading
-# ---------------------------------------------------------------------------
-
-
-def load_data_catalog() -> dict | None:
-    """Load data_catalog.yaml from the resolved config directory."""
-    import yaml
-
-    try:
-        config_dir = _resolve_config_dir()
-    except FileNotFoundError:
-        return None
-    path = config_dir / "data_catalog.yaml"
-    if not path.exists():
-        return None
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
-# ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
 
 
-def _format_columns(columns: list[dict]) -> str:
+def _format_columns(view: ViewMetadata) -> str:
     lines = []
-    for col in columns:
-        desc = col.get("description", "")
-        defn = col.get("definition", "")
+    for col in view.columns:
+        desc = col.description or ""
+        defn = col.definition or ""
         if desc and defn:
             suffix = f": {desc} — {defn}"
         elif desc:
@@ -72,39 +72,45 @@ def _format_columns(columns: list[dict]) -> str:
             suffix = f": {defn}"
         else:
             suffix = ""
-        lines.append(f"- {col['name']} ({col['type']}){suffix}")
+        bq_type = col.bq_type or ""
+        type_part = f" ({bq_type})" if bq_type else ""
+        lines.append(f"- {col.name}{type_part}{suffix}")
     return "\n".join(lines)
 
 
-def _format_view(name: str, view: dict) -> str:
+def _format_view(view: ViewMetadata) -> str:
     parts = []
-    if view.get("is_raw_table"):
-        parts.append(f"### {name} (raw table — {view['description']})")
+    if view.is_raw_table:
+        parts.append(f"### {view.name} (raw table — {view.description})")
     else:
-        parts.append(f"### {name}")
+        parts.append(f"### {view.name}")
 
-    parts.append(view["description"])
-    if view.get("grain"):
-        parts.append(view["grain"])
-    if view.get("extra_context"):
-        parts.append(view["extra_context"])
+    parts.append(view.description)
+    if view.grain:
+        parts.append(view.grain)
+    if view.extra_context:
+        parts.append(view.extra_context)
 
-    if view.get("use_for"):
-        parts.append(f"Use this for: {view['use_for']}")
-    if view.get("typical_questions"):
-        questions = ", ".join(f'"{q}"' for q in view["typical_questions"])
+    if view.use_for:
+        parts.append(f"Use this for: {view.use_for}")
+    if view.typical_questions:
+        questions = ", ".join(f'"{q}"' for q in view.typical_questions)
         parts.append(f"Typical questions: {questions}")
 
-    if view.get("important"):
-        parts.append(f"**Important:** {view['important']}")
+    if view.important:
+        parts.append(f"**Important:** {view.important}")
 
     parts.append("Columns:")
-    parts.append(_format_columns(view["columns"]))
+    parts.append(_format_columns(view))
 
     return "\n".join(parts)
 
 
-def _format_joins_filtered(catalog: dict, existing: frozenset[str]) -> str:
+def _format_joins_filtered(
+    relationships: list[JoinRelationship],
+    notes: list[str],
+    existing: frozenset[str],
+) -> str:
     parts = [
         "## View Relationships (for JOINs)",
         "",
@@ -116,10 +122,10 @@ def _format_joins_filtered(catalog: dict, existing: frozenset[str]) -> str:
     ]
 
     has_joins = False
-    for rel in catalog.get("join_relationships", []):
-        if rel["view_a"] in existing and rel["view_b"] in existing:
-            keys = " + ".join(rel["keys"])
-            parts.append(f"| {rel['view_a']} | {rel['view_b']} | {keys} |")
+    for rel in relationships:
+        if rel.view_a in existing and rel.view_b in existing:
+            keys = " + ".join(rel.keys)
+            parts.append(f"| {rel.view_a} | {rel.view_b} | {keys} |")
             has_joins = True
 
     if not has_joins:
@@ -127,20 +133,25 @@ def _format_joins_filtered(catalog: dict, existing: frozenset[str]) -> str:
 
     parts.append("")
     parts.append("Notes:")
-    for note in catalog.get("join_notes", []):
+    for note in notes:
         if any(t in note for t in existing):
             parts.append(f"- {note}")
 
     return "\n".join(parts)
 
 
-def _format_examples_filtered(catalog: dict, dataset: str, existing: frozenset[str]) -> str:
+def _format_examples_filtered(
+    examples: list[QueryExample],
+    catalog_view_names: frozenset[str],
+    dataset: str,
+    existing: frozenset[str],
+) -> str:
     parts = ["## Query Patterns"]
 
-    for ex in catalog.get("query_examples", []):
-        sql = ex["sql"].strip()
+    for ex in examples:
+        sql = ex.sql.strip()
         skip = False
-        for view_name in catalog.get("views", {}):
+        for view_name in catalog_view_names:
             if view_name in sql and view_name not in existing:
                 skip = True
                 break
@@ -148,33 +159,33 @@ def _format_examples_filtered(catalog: dict, dataset: str, existing: frozenset[s
             continue
 
         sql = sql.replace("adp_client_07", dataset)
-        parts.append(f"\n### {ex['name']}")
+        parts.append(f"\n### {ex.name}")
         parts.append(f"```sql\n{sql}\n```")
 
     return "\n".join(parts)
 
 
-def _format_warnings(catalog: dict) -> str:
+def _format_warnings(warnings: list[str]) -> str:
     parts = ["## Important Notes"]
-    for warning in catalog.get("ai_warnings", []):
+    for warning in warnings:
         parts.append(f"- {warning}")
     return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# KPI section — cached, reads from registry
+# KPI section — cached, reads from data_context API
 # ---------------------------------------------------------------------------
 
 
 @cached(_kpi_cache, lock=_kpi_lock)
 def _build_kpi_section() -> str:
-    """Format KPI definitions from the registry as a markdown block."""
-    try:
-        reg = RegistryService(load_schemas=False)
-    except Exception:
-        return ""
+    """Format KPI definitions from the data_context API as a markdown block.
 
-    kpis = reg.registry.kpis
+    Unfiltered (global catalog): the SQL generation prompt is per-client by
+    way of the ``existing`` views filter, but KPI definitions themselves are
+    universal — formulae and warnings don't change between clients.
+    """
+    kpis = get_kpis()
     if not kpis:
         return ""
 
@@ -185,10 +196,13 @@ def _build_kpi_section() -> str:
         "",
     ]
 
-    direction_label = {"lower_is_better": "lower is better", "higher_is_better": "higher is better"}
+    direction_label = {
+        "lower_is_better": "lower is better",
+        "higher_is_better": "higher is better",
+    }
 
-    for name, k in kpis.items():
-        parts = [f"**{name.upper()}**"]
+    for key, k in kpis.items():
+        parts = [f"**{key.upper()}**"]
         parts.append(f"= {k.formula}")
         if k.unit:
             parts.append(f"[{k.unit}]")
@@ -219,7 +233,9 @@ def _discover_client_tables(gcp_project: str, dataset: str) -> frozenset[str]:
     try:
         return frozenset(t.table_id for t in bq.list_tables(f"{gcp_project}.{dataset}"))
     except Exception:
-        logger.warning("Failed to list tables for %s.%s", gcp_project, dataset, exc_info=True)
+        logger.warning(
+            "Failed to list tables for %s.%s", gcp_project, dataset, exc_info=True
+        )
         return frozenset()
 
 
@@ -229,44 +245,55 @@ def _discover_client_tables(gcp_project: str, dataset: str) -> frozenset[str]:
 
 
 def build_client_schema(gcp_project: str, dataset: str) -> str:
-    """Build a schema context containing only views/tables that exist for this client."""
-    catalog = load_data_catalog()
-    if catalog is None:
-        logger.warning("data_catalog.yaml not found, using fallback")
-        return _FALLBACK_SCHEMA_CONTEXT
+    """Build a schema context containing only views/tables that exist for this client.
 
+    Fails loud (via the underlying ``data_context`` API) if ``data_catalog.yaml``
+    is missing or unparseable — there is no silent fallback by design (plan F6).
+    """
     existing = _discover_client_tables(gcp_project, dataset)
 
-    client_views = {
-        name: view for name, view in catalog.get("views", {}).items()
-        if name in existing
-    }
+    catalog_view_names = frozenset(list_views())
+    relevant = [name for name in catalog_view_names if name in existing]
 
-    if not client_views:
-        logger.warning("No catalog views found in %s, using full catalog", dataset)
-        client_views = catalog.get("views", {})
+    # If BQ introspection returned nothing (transient error, dataset
+    # unreachable) fall back to the full catalog so the prompt is still
+    # complete — better an over-broad schema than an empty one.
+    if not relevant:
+        logger.warning(
+            "No catalog views found in %s, using full catalog", dataset
+        )
+        relevant = sorted(catalog_view_names)
 
-    parts = []
-
-    parts.append(f"## Dataset: `{gcp_project}.{dataset}`")
-    parts.append("")
+    parts = [f"## Dataset: `{gcp_project}.{dataset}`", ""]
 
     parts.append("## Available Tables and Views")
     parts.append("")
-    parts.append("All views contain a `client_id` (STRING) column that identifies the client.")
+    parts.append(
+        "All views contain a `client_id` (STRING) column that identifies the client."
+    )
     parts.append("")
 
-    for name, view in client_views.items():
-        parts.append(_format_view(name, view))
+    for name in relevant:
+        parts.append(_format_view(get_view_metadata(name)))
         parts.append("")
 
-    parts.append(_format_joins_filtered(catalog, existing))
+    parts.append(
+        _format_joins_filtered(
+            get_join_relationships(),
+            get_join_notes(),
+            existing,
+        )
+    )
     parts.append("")
 
-    parts.append(_format_examples_filtered(catalog, dataset, existing))
+    parts.append(
+        _format_examples_filtered(
+            get_query_examples(), catalog_view_names, dataset, existing
+        )
+    )
     parts.append("")
 
-    parts.append(_format_warnings(catalog))
+    parts.append(_format_warnings(get_ai_warnings()))
 
     kpi_section = _build_kpi_section()
     if kpi_section:
@@ -274,38 +301,3 @@ def build_client_schema(gcp_project: str, dataset: str) -> str:
         parts.append(kpi_section)
 
     return "\n".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Fallback: used only if data_catalog.yaml is not found
-# ---------------------------------------------------------------------------
-
-_FALLBACK_SCHEMA_CONTEXT = """
-## Available Datasets
-Each client has their own dataset prefixed with `adp_`.
-Check the client selector for available datasets.
-
-## Views (recommended - deduplicated with pre-calculated KPIs)
-
-All views contain a `client_id` (STRING) column that identifies the client.
-
-### v_ads_summary_daily
-Client-level daily totals. Columns: date, active_campaigns, impressions, clicks, cost, purchases, sales, units_sold, acos, roas, ctr, cpc, cvr, client_id
-
-### v_ads_campaign_daily
-Campaign-level daily metrics. Columns: date, campaign_id, campaign_name, campaign_status, budget, currency, impressions, clicks, cost, purchases, sales, units_sold, acos, roas, ctr, cpc, cvr, client_id
-
-### v_ads_adgroup_daily
-Ad group daily metrics. Columns: date, adgroup_id, adgroup_name, impressions, clicks, cost, purchases, sales, units_sold, acos, roas, ctr, cpc, cvr, client_id
-
-### v_ads_asin_daily
-ASIN daily metrics. Columns: date, asin, sku, campaign_name, impressions, clicks, cost, purchases, sales, units_sold, acos, roas, ctr, cpc, cvr, client_id
-
-### v_ads_searchterm_daily
-Search term daily metrics. Columns: date, search_term, keyword, keyword_id, keyword_type, match_type, campaign_name, campaign_id, ad_group_name, ad_group_id, impressions, clicks, cost, purchases, sales, units_sold, acos, roas, ctr, cpc, cvr, client_id
-
-## Important Notes
-- Use SAFE_DIVIDE for divisions
-- Always include LIMIT
-- Date format: YYYY-MM-DD
-"""
