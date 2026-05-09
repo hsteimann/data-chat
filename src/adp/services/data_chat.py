@@ -349,6 +349,7 @@ def run_query(
             "date_range": f"{sd} → {ed}",
             "truncated": False,
             "render_as": "text_only",
+            "chart_render_status": "no_chart",
             "note": None,
             "query_id": query_id,
         }
@@ -375,6 +376,8 @@ def run_query(
         )
 
     render_as = "plotly_artifact" if chart_spec else "text_only"
+    # Default — MCP tool may overwrite with "render_failed" if PNG rendering throws.
+    chart_render_status = "rendered" if chart_spec else "no_chart"
     _log_query_safe(query_id, client_id, question, sql, True, len(df), render_as)
 
     return {
@@ -389,6 +392,7 @@ def run_query(
         "date_range": f"{sd} → {ed}",
         "truncated": truncated,
         "render_as": render_as,
+        "chart_render_status": chart_render_status,
         "note": note,
         "query_id": query_id,
     }
