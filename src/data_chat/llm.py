@@ -154,5 +154,10 @@ def llm_from_env() -> tuple[LlmClient, str]:
             f"DATA_CHAT_LLM_PROVIDER={provider!r} — use one of {sorted(DEFAULT_MODELS)}"
         )
     model = os.environ.get("DATA_CHAT_MODEL", DEFAULT_MODELS[provider])
-    llm = AnthropicLlm() if provider == "anthropic" else OpenAILlm()
+    try:
+        llm = AnthropicLlm() if provider == "anthropic" else OpenAILlm()
+    except ModuleNotFoundError as e:
+        raise SystemExit(
+            f"The {provider} SDK is not installed — run `uv sync --extra {provider}`."
+        ) from e
     return llm, model

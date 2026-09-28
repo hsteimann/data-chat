@@ -41,3 +41,19 @@ def test_unknown_provider_is_refused(monkeypatch):
     monkeypatch.setenv("DATA_CHAT_LLM_PROVIDER", "somebody")
     with pytest.raises(ValueError, match="DATA_CHAT_LLM_PROVIDER"):
         llm_from_env()
+
+
+def test_a_missing_sdk_says_how_to_install_it(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_sdk(name, *args, **kwargs):
+        if name in ("anthropic", "openai"):
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_sdk)
+    monkeypatch.setenv("DATA_CHAT_LLM_PROVIDER", "anthropic")
+    with pytest.raises(SystemExit, match="uv sync --extra anthropic"):
+        llm_from_env()
