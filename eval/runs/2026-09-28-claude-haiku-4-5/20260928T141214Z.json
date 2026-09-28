@@ -1,0 +1,284 @@
+{
+  "meta": {
+    "model": "claude-haiku-4-5",
+    "stages": [
+      "schema",
+      "freetext",
+      "catalog"
+    ],
+    "questions": "/home/agent/work/data-chat/eval/questions.yaml",
+    "run_at": "20260928T141214Z"
+  },
+  "outcomes": [
+    {
+      "stage": "schema",
+      "question_id": "spend_august",
+      "correct": false,
+      "sql": "SELECT ROUND(SUM(cost), 2) AS total_ad_spend\nFROM ads_campaign_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "roas_by_channel",
+      "correct": true,
+      "sql": "WITH campaign_data AS (\n  SELECT\n    c.channel,\n    SUM(acd.cost) AS total_cost,\n    SUM(acd.attributed_sales_14d) AS total_attributed_sales\n  FROM ads_campaign_daily acd\n  JOIN campaigns c ON acd.campaign_id = c.campaign_id\n  WHERE acd.date BETWEEN '2026-08-01' AND '2026-08-31'\n    AND c.channel IN ('search', 'display')\n  GROUP BY c.channel\n)\nSELECT\n  channel,\n  ROUND(total_cost / 100.0, 2) AS total_cost,\n  ROUND(total_attributed_sales, 2) AS total_attributed_sales,\n  ROUND(total_attributed_sales / NULLIF(total_cost / 100.0, 0), 2) AS roas\nFROM campaign_data\nORDER BY channel\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "net_revenue_august",
+      "correct": false,
+      "sql": "SELECT\n  ROUND(SUM(revenue_gross), 2) AS net_revenue\nFROM shop_orders_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "return_rate_by_category",
+      "correct": true,
+      "sql": "WITH daily_returns AS (\n  SELECT \n    so.date,\n    p.category,\n    SUM(so.units_returned) AS total_returned,\n    SUM(so.units_ordered) AS total_ordered\n  FROM shop_orders_daily so\n  JOIN products p ON so.sku = p.sku\n  WHERE so.date BETWEEN '2026-07-01' AND '2026-09-27'\n  GROUP BY so.date, p.category\n)\nSELECT \n  category,\n  SUM(total_returned) AS total_units_returned,\n  SUM(total_ordered) AS total_units_ordered,\n  ROUND(100.0 * SUM(total_returned) / NULLIF(SUM(total_ordered), 0), 2) AS return_rate_percent\nFROM daily_returns\nGROUP BY category\nORDER BY return_rate_percent DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "top_campaigns_clicks",
+      "correct": true,
+      "sql": "SELECT \n  c.campaign_id,\n  c.campaign_name,\n  SUM(acd.clicks) as total_clicks\nFROM ads_campaign_daily acd\nJOIN campaigns c ON acd.campaign_id = c.campaign_id\nWHERE acd.date BETWEEN '2026-09-14' AND '2026-09-20'\nGROUP BY c.campaign_id, c.campaign_name\nORDER BY total_clicks DESC\nLIMIT 5",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "paid_search_conversion_rate",
+      "correct": false,
+      "sql": "SELECT\n  ROUND(\n    SUM(purchases) * 100.0 / NULLIF(SUM(sessions), 0),\n    2\n  ) AS conversion_rate_percent\nFROM web_sessions_daily\nWHERE channel = 'paid search'\n  AND date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "avg_daily_sessions",
+      "correct": false,
+      "sql": "SELECT ROUND(AVG(sessions), 2) as avg_sessions_per_day\nFROM web_sessions_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "display_ctr",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(c.clicks)::DOUBLE / NULLIF(SUM(c.impressions), 0), 4) AS ctr\nFROM ads_campaign_daily c\nJOIN campaigns camp ON c.campaign_id = camp.campaign_id\nWHERE camp.channel = 'display'\n  AND c.date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "running_units_september",
+      "correct": true,
+      "sql": "SELECT\n  SUM(s.units_ordered) AS total_units_ordered\nFROM shop_orders_daily s\nJOIN products p ON s.sku = p.sku\nWHERE p.category = 'Running'\n  AND s.date BETWEEN '2026-09-01' AND '2026-09-27'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "cost_per_order",
+      "correct": false,
+      "sql": "WITH august_data AS (\n  SELECT\n    SUM(cost) AS total_cost,\n    SUM(attributed_orders_14d) AS total_orders\n  FROM ads_campaign_daily\n  WHERE date BETWEEN '2026-08-01' AND '2026-08-31'\n)\nSELECT\n  ROUND(SUM(total_cost) / NULLIF(SUM(total_orders), 0), 2) AS cost_per_attributed_order\nFROM august_data\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "spend_august",
+      "correct": false,
+      "sql": "SELECT\n  ROUND(SUM(cost), 2) AS total_ad_spend\nFROM ads_campaign_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "roas_by_channel",
+      "correct": true,
+      "sql": "WITH campaign_data AS (\n  SELECT\n    c.channel,\n    SUM(acd.cost) AS total_cost,\n    SUM(acd.attributed_sales_14d) AS total_sales\n  FROM ads_campaign_daily acd\n  JOIN campaigns c ON acd.campaign_id = c.campaign_id\n  WHERE acd.date BETWEEN '2026-08-01' AND '2026-08-31'\n  GROUP BY c.channel\n)\nSELECT\n  channel,\n  ROUND(total_cost / 100.0, 2) AS total_cost_usd,\n  ROUND(total_sales, 2) AS total_attributed_sales,\n  ROUND(total_sales / NULLIF(total_cost / 100.0, 0), 2) AS roas\nFROM campaign_data\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "net_revenue_august",
+      "correct": false,
+      "sql": "SELECT \n  ROUND(SUM(revenue_gross) - SUM(revenue_gross * units_returned / NULLIF(units_ordered, 0)), 2) AS net_revenue\nFROM shop_orders_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "return_rate_by_category",
+      "correct": true,
+      "sql": "WITH product_returns AS (\n  SELECT\n    p.category,\n    SUM(s.units_ordered) as total_units_ordered,\n    SUM(s.units_returned) as total_units_returned\n  FROM shop_orders_daily s\n  JOIN products p ON s.sku = p.sku\n  WHERE s.date BETWEEN '2026-07-01' AND '2026-09-27'\n  GROUP BY p.category\n)\nSELECT\n  category,\n  total_units_ordered,\n  total_units_returned,\n  ROUND(100.0 * total_units_returned / NULLIF(total_units_ordered, 0), 2) as return_rate_percent\nFROM product_returns\nORDER BY return_rate_percent DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "top_campaigns_clicks",
+      "correct": true,
+      "sql": "SELECT \n  c.campaign_id,\n  c.campaign_name,\n  SUM(a.clicks) AS total_clicks\nFROM ads_campaign_daily a\nJOIN campaigns c ON a.campaign_id = c.campaign_id\nWHERE a.date BETWEEN '2026-09-14' AND '2026-09-20'\nGROUP BY c.campaign_id, c.campaign_name\nORDER BY total_clicks DESC\nLIMIT 5",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "paid_search_conversion_rate",
+      "correct": false,
+      "sql": "SELECT\n  ROUND(\n    SUM(w.purchases) * 100.0 / NULLIF(SUM(w.sessions), 0),\n    2\n  ) AS conversion_rate_percent\nFROM web_sessions_daily w\nWHERE w.channel = 'search'\n  AND w.date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "avg_daily_sessions",
+      "correct": false,
+      "sql": "SELECT\n  ROUND(AVG(sessions), 2) AS avg_sessions_per_day\nFROM web_sessions_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "display_ctr",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(c.clicks) / NULLIF(SUM(c.impressions), 0) * 100, 2) AS ctr_percent\nFROM ads_campaign_daily c\nJOIN campaigns cam ON c.campaign_id = cam.campaign_id\nWHERE cam.channel = 'display'\n  AND c.date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "running_units_september",
+      "correct": true,
+      "sql": "SELECT\n  SUM(so.units_ordered) as total_units_ordered\nFROM shop_orders_daily so\nJOIN products p ON so.sku = p.sku\nWHERE p.category = 'Running'\n  AND so.date BETWEEN '2026-09-01' AND '2026-09-27'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "cost_per_order",
+      "correct": false,
+      "sql": "WITH august_data AS (\n  SELECT\n    SUM(cost) as total_cost,\n    SUM(attributed_orders_14d) as total_orders\n  FROM ads_campaign_daily\n  WHERE date BETWEEN '2026-08-01' AND '2026-08-31'\n)\nSELECT\n  ROUND(total_cost / NULLIF(total_orders, 0), 2) as cost_per_attributed_order\nFROM august_data\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "spend_august",
+      "correct": true,
+      "sql": "SELECT ROUND(SUM(cost) / 100, 2) AS total_ad_spend_eur\nFROM ads_campaign_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "roas_by_channel",
+      "correct": true,
+      "sql": "SELECT c.channel,\n       ROUND(SUM(a.cost) / 100, 2) AS spend_eur,\n       ROUND(SUM(a.attributed_sales_14d), 2) AS attributed_sales_eur,\n       ROUND(SUM(a.attributed_sales_14d) / NULLIF(SUM(a.cost) / 100, 0), 2) AS roas\nFROM ads_campaign_daily a\nJOIN campaigns c ON c.campaign_id = a.campaign_id\nWHERE a.date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY c.channel\nORDER BY spend_eur DESC\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "net_revenue_august",
+      "correct": true,
+      "sql": "SELECT ROUND(SUM(revenue_gross) / 1.19, 2) AS net_revenue_eur\nFROM shop_orders_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "return_rate_by_category",
+      "correct": true,
+      "sql": "SELECT p.category,\n       ROUND(SUM(s.units_returned) / NULLIF(SUM(s.units_ordered), 0), 4) AS return_rate\nFROM shop_orders_daily s\nJOIN products p ON p.sku = s.sku\nWHERE s.date BETWEEN '2026-07-01' AND '2026-09-27'\nGROUP BY p.category\nORDER BY return_rate DESC\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "top_campaigns_clicks",
+      "correct": true,
+      "sql": "SELECT c.campaign_name,\n       SUM(a.clicks) AS total_clicks\nFROM ads_campaign_daily a\nJOIN campaigns c ON c.campaign_id = a.campaign_id\nWHERE a.date BETWEEN '2026-09-14' AND '2026-09-20'\nGROUP BY c.campaign_name\nORDER BY total_clicks DESC\nLIMIT 5",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "paid_search_conversion_rate",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(purchases) / NULLIF(SUM(sessions), 0), 4) AS conversion_rate\nFROM web_sessions_daily\nWHERE channel = 'paid_search'\n  AND date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "avg_daily_sessions",
+      "correct": true,
+      "sql": "SELECT ROUND(AVG(daily_sessions), 2) AS avg_sessions_per_day\nFROM (\n  SELECT date, SUM(sessions) AS daily_sessions\n  FROM web_sessions_daily\n  WHERE date BETWEEN '2026-08-01' AND '2026-08-31'\n  GROUP BY date\n) AS daily\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "display_ctr",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(a.clicks) / NULLIF(SUM(a.impressions), 0), 4) AS ctr\nFROM ads_campaign_daily a\nJOIN campaigns c ON c.campaign_id = a.campaign_id\nWHERE a.date BETWEEN '2026-08-01' AND '2026-08-31'\n  AND c.channel = 'display'\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "running_units_september",
+      "correct": true,
+      "sql": "SELECT ROUND(SUM(s.units_ordered), 0) AS units_ordered\nFROM shop_orders_daily s\nJOIN products p ON p.sku = s.sku\nWHERE s.date BETWEEN '2026-09-01' AND '2026-09-27'\n  AND p.category = 'Running'\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    },
+    {
+      "stage": "catalog",
+      "question_id": "cost_per_order",
+      "correct": true,
+      "sql": "SELECT ROUND((SUM(a.cost) / 100) / NULLIF(SUM(a.attributed_orders_14d), 0), 2) AS cost_per_attributed_order\nFROM ads_campaign_daily a\nWHERE a.date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000",
+      "failure": null,
+      "error": null,
+      "retried": false
+    }
+  ]
+}

@@ -105,7 +105,35 @@ The demo data contains the properties that turn a plausible query into a wrong n
 
 ## Results
 
-**No measured results are published here yet.** Model output varies from run to run, and a number in this README should come from a recorded run: model, date, per-question SQL. `data-chat eval` prints the table and writes every generated query to `eval/results/<timestamp>.json`. Published results will name the model and the run.
+Measured on 2026-09-28 with **`claude-haiku-4-5`**, three runs of all ten questions per stage. The per-question SQL of every run is in `eval/runs/2026-09-28-claude-haiku-4-5/`.
+
+| Question (trap) | schema | freetext | catalog |
+|---|---|---|---|
+| spend_august (cost in cents) | 0/3 | 0/3 | 3/3 |
+| roas_by_channel (cents, join for channel) | 1/3 | 1/3 | 3/3 |
+| net_revenue_august (VAT included) | 0/3 | 0/3 | 3/3 |
+| return_rate_by_category (join, ratio of sums) | 3/3 | 3/3 | 3/3 |
+| top_campaigns_clicks (join for names) | 3/3 | 3/3 | 3/3 |
+| paid_search_conversion_rate (channel vocabulary) | 0/3 | 0/3 | 3/3 |
+| avg_daily_sessions (five rows per day) | 0/3 | 0/3 | 3/3 |
+| display_ctr (join, ratio of sums) | 3/3 | 3/3 | 3/3 |
+| running_units_september (join for category) | 3/3 | 3/3 | 3/3 |
+| cost_per_order (cost in cents) | 0/3 | 0/3 | 3/3 |
+| **all** | **13/30** | **13/30** | **30/30** |
+
+What the failures look like, from the recorded SQL:
+
+- Without the catalog the model sums `cost` as euros (100× too high). For ROAS it once divided by 100 on its own, in the other two runs it did not.
+- It filters `channel = 'paid search'` while the value is `paid_search`, so the query finds nothing. The catalog names the values.
+- It takes `AVG(sessions)` over rows that are one per day **and channel**.
+- It reports gross revenue as revenue.
+
+Read these numbers with their limits:
+
+- **One small model.** Haiku is what the sandbox this was built in allows. The Brain runs a larger model, not measured here.
+- **Ten questions, written together with the demo data.** The traps are real ones, but they are chosen, so this shows the mechanism, not a rate you should expect elsewhere.
+- **Free text = schema here.** The free-text note is table level, and every miss above is a field-level trap, so the note changes nothing. In the Brain's own history, free text was the step up from *no* context at all. This setup does not measure that step: its baseline already has the table and column names.
+- **Scored on the result table** (`src/data_chat/evaluation.py`), not on the prose answer.
 
 ## Layout
 
