@@ -16,12 +16,13 @@ dependencies = [
 anthropic = ["anthropic>=0.40"]
 openai = ["openai>=1.50"]
 bigquery = ["google-cloud-bigquery>=3.25", "db-dtypes>=1.3"]
+chart = ["plotly>=5.24"]
 
 [project.scripts]
 data-chat = "data_chat.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.3"]
+dev = ["pytest>=8.3", "plotly>=5.24"]
 
 [build-system]
 requires = ["hatchling"]
