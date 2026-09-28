@@ -3,6 +3,7 @@
     data-chat demo-data                       # data/demo.duckdb (generated)
     data-chat prompt --stage catalog          # the SQL system prompt — no API key needed
     data-chat ask "What was our ad spend in August 2026?" --stage catalog
+    data-chat ask "Ad spend per channel in August 2026?" --chart answer.html
     data-chat eval                            # all questions × all three stages
 """
 
@@ -77,6 +78,11 @@ def cmd_ask(args) -> None:
         print(result.answer)
     if result.chart_spec:
         print(f"\nchart: {result.chart_spec}")
+    if args.chart:
+        from data_chat.page import answer_page, chart_section
+
+        args.chart.write_text(answer_page(result, model=model, stage=args.stage), encoding="utf-8")
+        print(f"chart {chart_section(result)[1]} · page written to {args.chart}")
 
 
 def cmd_eval(args) -> None:
@@ -90,14 +96,15 @@ def cmd_eval(args) -> None:
     stages = tuple(args.stage) if args.stage else STAGES
     outcomes = run_eval(
         questions, llm=llm, model=model, backend=backend, stages=stages,
-        start_date=start, end_date=end,
+        start_date=start, end_date=end, charts=args.charts,
     )
     print(summary_table(outcomes, questions))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = write_outcomes(
         outcomes,
         REPO_ROOT / "eval" / "results" / f"{stamp}.json",
-        {"model": model, "stages": list(stages), "questions": str(args.questions), "run_at": stamp},
+        {"model": model, "stages": list(stages), "questions": str(args.questions),
+         "charts": args.charts, "run_at": stamp},
     )
     print(f"\nPer-question SQL and errors: {path}")
 
@@ -121,10 +128,14 @@ def main(argv: list[str] | None = None) -> None:
         if name == "ask":
             p.add_argument("question")
             p.add_argument("--stage", choices=STAGES, default="catalog")
+            p.add_argument("--chart", type=Path, metavar="PAGE.html",
+                           help="write the answer with its chart as an HTML page (needs --extra chart)")
         else:
             p.add_argument("--stage", choices=STAGES, action="append",
                            help="repeatable; default: all three")
             p.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
+            p.add_argument("--charts", action="store_true",
+                           help="also ask for the answer and check its chart spec (one more call per question)")
         p.add_argument("--start", help="date range start, YYYY-MM-DD (default: demo data start)")
         p.add_argument("--end", help="date range end, YYYY-MM-DD (default: demo data end)")
         p.set_defaults(func=func)
