@@ -124,9 +124,9 @@ Measured on 2026-09-28 with **`claude-haiku-4-5`**, three runs of all ten questi
 What the failures look like, from the recorded SQL:
 
 - Without the catalog the model sums `cost` as euros (100× too high). For ROAS it once divided by 100 on its own, in the other two runs it did not.
-- It filters `channel = 'paid search'` while the value is `paid_search`, so the query finds nothing. The catalog names the values.
+- It guesses the channel value and finds nothing: `'paid search'` with the schema alone, `'search'` with the free text, in all three runs. The value is `paid_search`. The free-text word comes from the note on the *campaigns* table ("channel (search or display)"), carried over to web traffic, which uses other values. The catalog's definition of `campaigns.channel` warns about exactly this.
 - It takes `AVG(sessions)` over rows that are one per day **and channel**.
-- It reports gross revenue as revenue.
+- It reports gross revenue as revenue (no division by 1.19 in any run).
 
 Read these numbers with their limits:
 
