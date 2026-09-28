@@ -155,10 +155,9 @@ eval/questions.yaml      questions, traps, reference queries
 tests/                   offline tests
 ```
 
-## Links
+## More
 
-- Workshop article on steimann.de: *(link follows)*
-- About the Nakoa Brain: *(link follows)*
+How this came about, in more detail: [steimann.de](https://steimann.de)
 
 ## License
 
