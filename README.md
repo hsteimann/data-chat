@@ -55,6 +55,7 @@ New commits from 2026-09-28 on, with their real dates. They make the pattern run
 - **Pure helpers copied from the Brain** (`src/data_chat/sql.py`, each marked with its origin): SQL extraction from the model's reply, the read-only check, chart-spec extraction.
 - **The catalog format of the Brain** (`catalog/data_catalog.yaml`) for the demo data.
 - **The same question at three stages**, and an evaluation that scores them.
+- **The chart after the answer** (component 2, see below): the model's chart spec checked against the result and drawn with Plotly, copied from the Brain.
 
 ## Quickstart
 
@@ -77,6 +78,11 @@ uv sync --extra anthropic
 export ANTHROPIC_API_KEY=...
 uv run data-chat ask "What was our net revenue in August 2026?" --stage catalog
 uv run data-chat eval                      # 10 questions × 3 stages
+
+# The answer with its chart as a self-contained HTML page:
+uv sync --extra anthropic --extra chart
+uv run data-chat ask "What was our ad spend per channel in August 2026?" --chart answer.html
+uv run data-chat eval --stage catalog --charts   # also checks each chart spec
 ```
 
 Other providers: `uv sync --extra openai` and `DATA_CHAT_LLM_PROVIDER=openai` (plus `OPENAI_BASE_URL` for a compatible gateway). Choose the model with `DATA_CHAT_MODEL`. BigQuery: `uv sync --extra bigquery`, then `--bigquery PROJECT.DATASET`.
@@ -135,6 +141,22 @@ Read these numbers with their limits:
 - **Free text = schema here.** The free-text note is table level, and every miss above is a field-level trap, so the note changes nothing. In the Brain's own history, free text was the step up from *no* context at all. This setup does not measure that step: its baseline already has the table and column names.
 - **Scored on the result table** (`src/data_chat/evaluation.py`), not on the prose answer.
 
+## The chart after the answer
+
+The second component of the Brain's Data Chat: a chart drawn from the result, next to the SQL and the answer.
+
+**The model chooses, the code draws.** In the same call that writes the answer, after it has seen the result rows, the model adds one JSON line: `{"chart_type": "bar|line|scatter|pie", "x": …, "y": …, "color": …}` (rules in `src/data_chat/prompts.py`: a date column → line, categories → bar, a pie only up to six slices, no chart for a single value). Everything after that is deterministic:
+
+- `parse_chart_spec` checks the spec against the result's columns. An unknown type or an `x`/`y` the result does not have is refused with the reason. A missing colour column is dropped.
+- `chart_figure` draws it with Plotly.
+- `data-chat ask --chart page.html` writes one page: the question, **the SQL first**, the answer, the chart, and the table it was drawn from. When the spec does not fit, the page says why instead of drawing something else.
+
+In the Brain the same contract feeds three renderers: the dashboard (Plotly), an inline PNG for MCP clients (matplotlib) and an Excel chart. Until 2026-09-28 each of the three checked the spec on its own; the refactoring that gave them one contract is the code copied here (`src/data_chat/chart.py`, origin in its docstring). Left out: the trend-continuation keys, the colour pinning for the dashboard's table filter, and the Brain's theme.
+
+**Measured** on 2026-09-28 with `claude-haiku-4-5`, catalog stage, three runs (`eval/runs/2026-09-28-claude-haiku-4-5-charts/`): in all 30 answers the chart was what the prompt asks for. The three questions with more than one result row got a bar chart with the right columns (ROAS per channel, return rate per category, clicks per campaign); the seven single-value questions got none, as the prompt says. No spec was refused.
+
+Read that with its limit: **the ten questions contain no time series, no share of a total and no correlation**, so the model's choice of a line, a pie or a scatter is not measured here. The offline tests draw all four types; they do not test the choice.
+
 ## Layout
 
 ```
@@ -147,9 +169,11 @@ src/data_chat/
   prompts.py             system prompts
   sql.py                 pure helpers copied from the Brain
   pipeline.py            question → SQL → result → answer, one retry
+  chart.py               the answer's chart: spec check and Plotly figure
+  page.py                one answer as an HTML page (SQL, answer, chart, table)
   evaluation.py          scoring per stage
   demo_data.py           GENERATED demo data
-  cli.py                 data-chat demo-data | prompt | ask | eval
+  cli.py                 data-chat demo-data | prompt | ask [--chart] | eval [--charts]
 catalog/                 data_catalog.yaml (field level), freetext.md (table level)
 eval/questions.yaml      questions, traps, reference queries
 tests/                   offline tests

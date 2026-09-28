@@ -20,6 +20,14 @@ Scoring rules (``results_match``):
 - extra columns in the actual result are fine.
 
 Column order, row order and column names are ignored.
+
+With ``charts=True`` each question also gets its answer, and the chart spec
+is checked against the result (`chart.check_chart`): ``drawn``,
+``no chart``, or the reason it cannot be drawn. ``chart_ok`` then says
+whether that is what the prompt asks for (``chart_as_asked``): a chart for a
+result with more than one row, none for a single value. Both are recorded
+next to the score and do not change it — a right chart over a wrong number
+is still a wrong number.
 """
 
 from __future__ import annotations
@@ -34,6 +42,7 @@ import pandas as pd
 import yaml
 
 from data_chat.backend import SqlBackend
+from data_chat.chart import check_chart
 from data_chat.context import STAGES, build_context
 from data_chat.llm import LlmClient
 from data_chat.pipeline import ask
@@ -58,6 +67,18 @@ class Outcome:
     failure: str | None
     error: str | None
     retried: bool
+    #: None when charts were not asked for; else "drawn", "no chart" or the reason.
+    chart: str | None = None
+    #: Whether ``chart`` is what the prompt asks for (`chart_as_asked`).
+    chart_ok: bool | None = None
+    #: The spec as the model wrote it, for the record.
+    chart_spec: dict | None = None
+
+
+def chart_as_asked(status: str, rows: int) -> bool:
+    """The interpretation prompt: a chart spec for every result, skipped only
+    for a single value or an empty result."""
+    return status == ("drawn" if rows > 1 else "no chart")
 
 
 def load_questions(path: str | Path) -> list[Question]:
@@ -116,6 +137,7 @@ def run_eval(
     stages: tuple[str, ...] = STAGES,
     start_date: date,
     end_date: date,
+    charts: bool = False,
 ) -> list[Outcome]:
     outcomes = []
     for stage in stages:
@@ -124,8 +146,10 @@ def run_eval(
             expected = backend.execute(q.expected_sql)
             result = ask(
                 q.question, llm=llm, model=model, backend=backend, context=context,
-                start_date=start_date, end_date=end_date, answer_in_words=False,
+                start_date=start_date, end_date=end_date, answer_in_words=charts,
             )
+            rows = 0 if result.data is None else len(result.data)
+            chart = check_chart(result.chart_spec, result.data)[1] if charts else None
             outcomes.append(Outcome(
                 stage=stage,
                 question_id=q.id,
@@ -134,6 +158,9 @@ def run_eval(
                 failure=result.failure,
                 error=result.error,
                 retried=result.retried,
+                chart=chart,
+                chart_ok=None if chart is None else chart_as_asked(chart, rows),
+                chart_spec=result.chart_spec,
             ))
     return outcomes
 
@@ -154,6 +181,12 @@ def summary_table(outcomes: list[Outcome], questions: list[Question]) -> str:
         got = [o for o in outcomes if o.stage == s]
         totals.append(f"**{sum(o.correct for o in got)}/{len(got)}**")
     lines.append("| **correct** | " + " | ".join(totals) + " |")
+    if any(o.chart is not None for o in outcomes):
+        asked = []
+        for s in stages:
+            got = [o for o in outcomes if o.stage == s and o.chart is not None]
+            asked.append(f"{sum(bool(o.chart_ok) for o in got)}/{len(got)}")
+        lines.append("| chart as the prompt asks | " + " | ".join(asked) + " |")
     return "\n".join(lines)
 
 
