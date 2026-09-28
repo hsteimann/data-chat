@@ -1,0 +1,163 @@
+# Data catalog for the GENERATED demo data (src/data_chat/demo_data.py).
+# Same format as config/data_catalog.yaml in the Nakoa Brain: `description` is
+# the label, `definition` the instruction for use — written wherever misuse
+# would produce a plausible wrong number.
+
+views:
+  ads_campaign_daily:
+    description: Daily advertising performance per campaign.
+    grain: One row per date and campaign_id. A campaign has no row on a day it did not run (paused campaigns stop having rows).
+    use_for: Ad spend, clicks, impressions, CTR, CPC, ROAS, cost per order — per day, per campaign, per channel.
+    typical_questions:
+      - What was our ad spend last month?
+      - What is the ROAS per campaign?
+      - Which campaigns had the most clicks last week?
+    important: cost is in euro CENTS; attributed_sales_14d is in euros. Divide cost by 100 before comparing or combining it with any euro amount. Campaign names and channels are in `campaigns`, joined on campaign_id.
+    columns:
+      - name: date
+        type: DATE
+        description: Day the ad activity happened.
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign identifier.
+        definition: Join to campaigns.campaign_id for the campaign name and channel.
+      - name: impressions
+        type: INTEGER
+        description: Number of times an ad was shown.
+      - name: clicks
+        type: INTEGER
+        description: Number of clicks on an ad.
+        definition: CTR = SUM(clicks) / SUM(impressions) over the period — a ratio of sums, never the average of daily CTRs.
+      - name: cost
+        type: BIGINT
+        description: Ad spend in euro cents.
+        definition: Divide by 100 for euros. SUM(cost) / 100 is the spend in EUR; ROAS = SUM(attributed_sales_14d) / (SUM(cost) / 100); cost per order = (SUM(cost) / 100) / SUM(attributed_orders_14d).
+      - name: attributed_sales_14d
+        type: DOUBLE
+        description: Sales in euros attributed to an ad click within 14 days.
+        definition: Attributed by the ad platform, not shop revenue — never add it to or compare it one-to-one with shop_orders_daily.revenue_gross. Gross amount (incl. VAT), as the ad platform reports it.
+      - name: attributed_orders_14d
+        type: INTEGER
+        description: Orders attributed to an ad click within 14 days.
+
+  campaigns:
+    description: The advertising campaigns.
+    grain: One row per campaign.
+    use_for: Campaign names, channel (search or display) and current status.
+    columns:
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign identifier.
+      - name: campaign_name
+        type: VARCHAR
+        description: Name of the campaign.
+      - name: channel
+        type: VARCHAR
+        description: Advertising channel, `search` or `display`.
+        definition: Use this to split ad performance by channel. It is not the same vocabulary as web_sessions_daily.channel (`paid_search`, `display`, ...).
+      - name: status
+        type: VARCHAR
+        description: Current status, `active` or `paused`.
+        definition: Today's status only. A paused campaign still has its history in ads_campaign_daily up to the day it was paused.
+
+  products:
+    description: The shop's product catalogue.
+    grain: One row per SKU.
+    use_for: Product names, categories and list prices.
+    columns:
+      - name: sku
+        type: VARCHAR
+        description: Stock keeping unit, the product identifier.
+        definition: Join to shop_orders_daily.sku.
+      - name: product_name
+        type: VARCHAR
+        description: Product name.
+      - name: category
+        type: VARCHAR
+        description: Product category (Running, Hiking, Outerwear, Accessories).
+      - name: list_price
+        type: DOUBLE
+        description: List price in euros, including VAT.
+
+  shop_orders_daily:
+    description: Orders from the online shop per day and product.
+    grain: One row per date and sku, also on days with zero units.
+    use_for: Units ordered, returns, return rate, shop revenue — per day, product or category.
+    typical_questions:
+      - What was our revenue last month?
+      - What is the return rate per category?
+    important: revenue_gross includes 19 % VAT. "Revenue" without qualifier in a question means net revenue — divide by 1.19. Categories are in `products`, joined on sku.
+    columns:
+      - name: date
+        type: DATE
+        description: Order date.
+      - name: sku
+        type: VARCHAR
+        description: Product identifier.
+        definition: Join to products.sku for name and category.
+      - name: units_ordered
+        type: INTEGER
+        description: Units ordered on that day.
+      - name: units_returned
+        type: INTEGER
+        description: Units from that day's orders that were returned.
+        definition: Return rate = SUM(units_returned) / SUM(units_ordered) over the period — a ratio of sums.
+      - name: revenue_gross
+        type: DOUBLE
+        description: Revenue in euros including 19 % VAT, before returns.
+        definition: Net revenue = revenue_gross / 1.19. Returns are not deducted.
+
+  web_sessions_daily:
+    description: Website traffic per day and marketing channel.
+    grain: One row per date AND channel (five channels). A day's total is the SUM over its channel rows.
+    use_for: Sessions, engagement and conversion rate — per day or per channel.
+    typical_questions:
+      - How many sessions did we have yesterday?
+      - What is the conversion rate of paid search?
+    important: Because every date has five rows, AVG(sessions) over rows is the average per channel-day, not per day. For a daily average, first SUM per date, then average those sums.
+    columns:
+      - name: date
+        type: DATE
+        description: Day of the sessions.
+      - name: channel
+        type: VARCHAR
+        description: Traffic channel (paid_search, display, organic, direct, email).
+      - name: sessions
+        type: INTEGER
+        description: Number of sessions.
+      - name: engaged_sessions
+        type: INTEGER
+        description: Sessions that lasted longer than 10 seconds or had a conversion.
+      - name: purchases
+        type: INTEGER
+        description: Sessions that ended in a purchase.
+        definition: Conversion rate = SUM(purchases) / SUM(sessions) over the period — a ratio of sums, never the average of daily rates.
+
+join_relationships:
+  - view_a: ads_campaign_daily
+    view_b: campaigns
+    keys: [campaign_id]
+  - view_a: shop_orders_daily
+    view_b: products
+    keys: [sku]
+
+join_notes:
+  - ads_campaign_daily and shop_orders_daily share only `date`; they describe different things (ad-attributed vs. shop revenue) and must not be summed together.
+
+query_examples:
+  - name: Spend and ROAS per channel
+    sql: |
+      SELECT c.channel,
+             ROUND(SUM(a.cost) / 100, 2) AS spend_eur,
+             ROUND(SUM(a.attributed_sales_14d) / NULLIF(SUM(a.cost) / 100, 0), 2) AS roas
+      FROM {ads_campaign_daily} a
+      JOIN {campaigns} c ON c.campaign_id = a.campaign_id
+      WHERE a.date BETWEEN '2026-08-01' AND '2026-08-31'
+      GROUP BY c.channel
+      ORDER BY spend_eur DESC
+      LIMIT 1000
+
+ai_warnings:
+  - Money columns are in euros except ads_campaign_daily.cost, which is in cents.
+  - Rates (CTR, conversion rate, return rate, ROAS) are ratios of sums over the whole period, never averages of daily ratios.
+  - Shop revenue is gross (incl. 19 % VAT); report net unless the question asks for gross.
