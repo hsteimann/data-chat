@@ -1,0 +1,95 @@
+# Evaluation questions for the GENERATED demo data.
+# `expected_sql` is the reference query (DuckDB). The expected answer is not
+# stored: it is computed by running expected_sql on the same database file,
+# so it cannot drift from the data. `trap` names what makes a plausible query
+# wrong — documentation for the reader, not used by the scorer.
+
+questions:
+  - id: spend_august
+    question: What was our total ad spend in August 2026?
+    trap: cost is stored in cents
+    expected_sql: |
+      SELECT SUM(cost) / 100 AS spend_eur
+      FROM ads_campaign_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: roas_by_channel
+    question: What was the ROAS of search versus display campaigns in August 2026?
+    trap: cost in cents; channel only via the campaigns table
+    expected_sql: |
+      SELECT c.channel, SUM(a.attributed_sales_14d) / (SUM(a.cost) / 100) AS roas
+      FROM ads_campaign_daily a JOIN campaigns c USING (campaign_id)
+      WHERE a.date BETWEEN '2026-08-01' AND '2026-08-31'
+      GROUP BY c.channel
+
+  - id: net_revenue_august
+    question: What was our net revenue in August 2026?
+    trap: revenue_gross includes 19 % VAT
+    expected_sql: |
+      SELECT SUM(revenue_gross) / 1.19 AS net_revenue
+      FROM shop_orders_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: return_rate_by_category
+    question: What was the return rate per product category from July 1 to September 27, 2026?
+    trap: category only via products; rate is a ratio of sums
+    expected_sql: |
+      SELECT p.category, SUM(o.units_returned) / SUM(o.units_ordered) AS return_rate
+      FROM shop_orders_daily o JOIN products p USING (sku)
+      WHERE o.date BETWEEN '2026-07-01' AND '2026-09-27'
+      GROUP BY p.category
+
+  - id: top_campaigns_clicks
+    question: Which 5 campaigns had the most clicks between September 14 and September 20, 2026?
+    trap: campaign names only via the campaigns table
+    expected_sql: |
+      SELECT c.campaign_name, SUM(a.clicks) AS clicks
+      FROM ads_campaign_daily a JOIN campaigns c USING (campaign_id)
+      WHERE a.date BETWEEN '2026-09-14' AND '2026-09-20'
+      GROUP BY c.campaign_name
+      ORDER BY clicks DESC
+      LIMIT 5
+
+  - id: paid_search_conversion_rate
+    question: What was the conversion rate of paid search sessions in August 2026?
+    trap: a rate is a ratio of sums, not an average of daily rates
+    expected_sql: |
+      SELECT SUM(purchases) / SUM(sessions) AS conversion_rate
+      FROM web_sessions_daily
+      WHERE channel = 'paid_search' AND date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: avg_daily_sessions
+    question: How many sessions did we have per day on average in August 2026?
+    trap: five rows per date (one per channel) — AVG over rows is per channel-day
+    expected_sql: |
+      SELECT AVG(day_sessions) AS avg_daily_sessions
+      FROM (
+        SELECT date, SUM(sessions) AS day_sessions
+        FROM web_sessions_daily
+        WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+        GROUP BY date
+      )
+
+  - id: display_ctr
+    question: What was the click-through rate of our display campaigns in August 2026?
+    trap: channel only via campaigns; CTR is a ratio of sums
+    expected_sql: |
+      SELECT SUM(a.clicks) / SUM(a.impressions) AS ctr
+      FROM ads_campaign_daily a JOIN campaigns c USING (campaign_id)
+      WHERE c.channel = 'display' AND a.date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: running_units_september
+    question: How many units were ordered in the Running category from September 1 to September 27, 2026?
+    trap: category only via products
+    expected_sql: |
+      SELECT SUM(o.units_ordered) AS units
+      FROM shop_orders_daily o JOIN products p USING (sku)
+      WHERE p.category = 'Running' AND o.date BETWEEN '2026-09-01' AND '2026-09-27'
+
+  - id: cost_per_order
+    question: What was the ad cost per attributed order in August 2026?
+    trap: cost is stored in cents
+    expected_sql: |
+      SELECT (SUM(cost) / 100) / SUM(attributed_orders_14d) AS cost_per_order
+      FROM ads_campaign_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
