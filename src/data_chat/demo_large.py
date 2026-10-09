@@ -254,7 +254,12 @@ def _shop(rng: random.Random) -> dict[str, pd.DataFrame]:
                     cid = rng.choice(known_customers)
                 cancelled = rng.random() < 0.04
                 gross = list_total = 0.0
-                for prod in rng.choices(PRODUCTS, weights=weights, k=rng.choice([1, 1, 1, 2, 2, 3])):
+                lines: list[tuple] = []  # distinct products per order: one line per sku
+                for _ in range(rng.choice([1, 1, 1, 2, 2, 3])):
+                    pick = rng.choices(PRODUCTS, weights=weights)[0]
+                    if pick not in lines:
+                        lines.append(pick)
+                for prod in lines:
                     sku, _, category, _, _, price, _, _ = prod
                     units = rng.choice([1, 1, 1, 2])
                     paid = _r2(units * price * (0.8 if d.month == 7 else 1.0))
@@ -482,7 +487,228 @@ def build_tables(seed: int = SEED) -> dict[str, pd.DataFrame]:
         **_marketplaces(rng),
     }
     tables.update(_web(rng, ads_all, shop["web_conversions_last_click_daily"]))
+    _enrich(tables, random.Random(seed + 1))
     return tables
+
+
+def _ratio(a: pd.Series, b: pd.Series, digits: int = 4) -> pd.Series:
+    return (a / b.where(b != 0)).fillna(0.0).round(digits)
+
+
+def _noise(rng: random.Random, n: int, lo: float, hi: float) -> list[float]:
+    return [rng.uniform(lo, hi) for _ in range(n)]
+
+
+def _enrich(t: dict[str, pd.DataFrame], rng: random.Random) -> None:
+    """The columns real reports carry besides the ones a question usually needs.
+
+    Many of them are precomputed per-row ratios (CTR, CPC, ACoS, frequency,
+    engagement rate). They are right on their row and wrong when averaged or
+    summed over rows — which is exactly how a real report invites a plausible
+    wrong number. A separate random stream, so the base figures above stay
+    the same whatever is added here.
+    """
+    names = {c[0]: c[1] for c in CAMPAIGNS}
+    status = {c[0]: ("paused" if c[0] in PAUSED_FROM else "active") for c in CAMPAIGNS}
+    prod = {p[0]: p for p in PRODUCTS}
+
+    gs = t["ads_google_search_campaign_daily"]
+    n = len(gs)
+    gs["campaign_name"] = gs.campaign_id.map(names)
+    gs["ctr"] = _ratio(gs.clicks, gs.impressions)
+    gs["average_cpc"] = _ratio(gs.cost_micros / 1e6, gs.clicks, 2)
+    gs["search_impression_share"] = [round(rng.uniform(0.35, 0.92), 4) for _ in range(n)]
+    gs["search_top_impression_share"] = (gs.search_impression_share * _noise(rng, n, 0.55, 0.85)).round(4)
+    gs["search_lost_is_budget"] = [round(rng.uniform(0.0, 0.25), 4) for _ in range(n)]
+    gs["search_lost_is_rank"] = (1 - gs.search_impression_share - gs.search_lost_is_budget).clip(lower=0).round(4)
+    gs["all_conversions"] = (gs.conversions * _noise(rng, n, 1.05, 1.35)).round(2)
+    gs["all_conversions_value"] = (gs.conversion_value * _noise(rng, n, 1.05, 1.3)).round(2)
+    gs["view_through_conversions"] = [rng.randint(0, 3) for _ in range(n)]
+    gs["cost_per_conversion"] = _ratio(gs.cost_micros / 1e6, gs.conversions, 2)
+    gs["conversion_rate"] = _ratio(gs.conversions, gs.clicks)
+
+    sh = t["ads_google_shopping_product_daily"]
+    n = len(sh)
+    sh["campaign_name"] = sh.campaign_id.map(names)
+    sh["product_title"] = sh.sku.map(lambda s: prod[s][1])
+    sh["product_brand"] = sh.sku.map(lambda s: prod[s][4])
+    sh["product_category_l1"] = sh.sku.map(lambda s: prod[s][2])
+    sh["ctr"] = _ratio(sh.clicks, sh.impressions)
+    sh["average_cpc"] = _ratio(sh.cost_micros / 1e6, sh.clicks, 2)
+    sh["benchmark_cpc"] = (sh.average_cpc * _noise(rng, n, 0.8, 1.25)).round(2)
+    sh["search_impression_share"] = [round(rng.uniform(0.2, 0.8), 4) for _ in range(n)]
+    sh["all_conversions"] = (sh.conversions * _noise(rng, n, 1.05, 1.3)).round(2)
+    sh["all_conversions_value"] = (sh.conversion_value * _noise(rng, n, 1.05, 1.3)).round(2)
+
+    me = t["ads_meta_campaign_daily"]
+    n = len(me)
+    me["campaign_name"] = me.campaign_id.map(names)
+    me["frequency"] = _ratio(me.impressions, me.reach, 2)
+    me["cpm"] = _ratio(me.spend * 1000, me.impressions, 2)
+    me["link_ctr"] = _ratio(me.link_clicks, me.impressions)
+    me["landing_page_views"] = (me.link_clicks * pd.Series(_noise(rng, n, 0.6, 0.85))).round().astype("int64")
+    me["add_to_cart"] = (me.landing_page_views * pd.Series(_noise(rng, n, 0.06, 0.12))).round().astype("int64")
+    me["initiate_checkout"] = (me.add_to_cart * pd.Series(_noise(rng, n, 0.35, 0.6))).round().astype("int64")
+    me["purchases_1d_click"] = (me.purchases * pd.Series(_noise(rng, n, 0.45, 0.7))).round().astype("int64")
+    me["purchase_value_1d_click"] = _ratio(me.purchase_value * me.purchases_1d_click, me.purchases, 2)
+    me["cost_per_purchase"] = _ratio(me.spend, me.purchases, 2)
+    me["video_3s_views"] = (me.impressions * pd.Series(_noise(rng, n, 0.08, 0.2))).round().astype("int64")
+    me["thruplays"] = (me.video_3s_views * pd.Series(_noise(rng, n, 0.2, 0.4))).round().astype("int64")
+
+    ms = t["ads_microsoft_campaign_daily"]
+    n = len(ms)
+    ms["campaign_name"] = ms.campaign_id.map(names)
+    ms["ctr"] = _ratio(ms.clicks, ms.impressions)
+    ms["average_cpc"] = _ratio(ms.spend, ms.clicks, 2)
+    ms["impression_share"] = [round(rng.uniform(0.3, 0.85), 4) for _ in range(n)]
+    ms["all_conversions"] = (ms.conversions * _noise(rng, n, 1.05, 1.3)).round(2)
+    ms["assists"] = [rng.randint(0, 6) for _ in range(n)]
+    ms["return_on_ad_spend"] = _ratio(ms.revenue, ms.spend, 2)
+
+    am = t["ads_amazon_sp_campaign_daily"]
+    n = len(am)
+    am["campaign_name"] = am.campaign_id.map(names)
+    am["campaign_status"] = am.campaign_id.map(status)
+    am["daily_budget"] = am.campaign_id.map({c[0]: float(c[4]) for c in CAMPAIGNS})
+    am["ctr"] = _ratio(am.clicks, am.impressions)
+    am["cpc"] = _ratio(am.cost, am.clicks, 2)
+    am["acos_14d"] = _ratio(am.cost, am.attributed_sales_14d)
+    am["roas_14d"] = _ratio(am.attributed_sales_14d, am.cost, 2)
+    am["units_sold_14d"] = (am.attributed_orders_14d * pd.Series(_noise(rng, n, 1.0, 1.3))).round().astype("int64")
+    am["sales_same_sku_14d"] = (am.attributed_sales_14d * pd.Series(_noise(rng, n, 0.7, 0.9))).round(2)
+    am["sales_other_sku_14d"] = (am.attributed_sales_14d - am.sales_same_sku_14d).round(2)
+    am["new_to_brand_orders_14d"] = (am.attributed_orders_14d * pd.Series(_noise(rng, n, 0.3, 0.6))).round().astype("int64")
+    am["top_of_search_impression_share"] = [round(rng.uniform(0.05, 0.4), 4) for _ in range(n)]
+
+    for name in ("ads_all_channels_daily", "ads_all_channels_weekly", "ads_all_channels_monthly"):
+        df = t[name]
+        df["ctr"] = _ratio(df.clicks, df.impressions)
+        df["cpc"] = _ratio(df.cost_eur, df.clicks, 2)
+        df["platform_roas"] = _ratio(df.platform_conversion_value, df.cost_eur, 2)
+
+    orders = t["shop_orders"]
+    n = len(orders)
+    items = t["shop_order_items"].groupby("order_id").units.sum()
+    orders["items_count"] = orders.order_id.map(items).astype("int64")
+    orders["payment_method"] = [rng.choice(["paypal"] * 4 + ["credit_card"] * 3 + ["invoice"] * 2 + ["apple_pay"])
+                                for _ in range(n)]
+    orders["device"] = [rng.choice(["mobile"] * 6 + ["desktop"] * 3 + ["tablet"]) for _ in range(n)]
+    orders["coupon_code"] = [rng.choice(["", "", "", "", "", "", "WELCOME10", "SUMMER20", "NEWSLETTER5"])
+                             for _ in range(n)]
+    country = dict(zip(t["customers"].customer_id, t["customers"].country))
+    orders["shipping_country"] = orders.customer_id.map(country)
+
+    done = orders[orders.order_status == "completed"]
+    per_day = done.groupby("order_date")
+    cancelled = orders[orders.order_status == "cancelled"].groupby("order_date").size()
+    for name, key, fn in (("shop_sales_daily", "date", lambda d: d),
+                          ("shop_sales_weekly", "week_start", _week),
+                          ("shop_sales_monthly", "month", _month)):
+        df = t[name]
+        disc = per_day.discount_gross.sum().groupby(lambda d: fn(d)).sum()
+        canc = cancelled.groupby(lambda d: fn(d)).sum()
+        df["discount_gross"] = df[key].map(disc).fillna(0).round(2)
+        df["cancelled_orders"] = df[key].map(canc).fillna(0).astype("int64")
+        df["returning_customer_orders"] = df.orders - df.new_customer_orders
+        df["avg_order_value_net"] = _ratio(df.revenue_net, df.orders, 2)
+
+    stats = done.groupby("customer_id").agg(orders_count=("order_id", "count"),
+                                            lifetime_revenue_net=("revenue_net", "sum"))
+    cu = t["customers"]
+    cu["orders_count"] = cu.customer_id.map(stats.orders_count).fillna(0).astype("int64")
+    cu["lifetime_revenue_net"] = cu.customer_id.map(stats.lifetime_revenue_net).fillna(0).round(2)
+    cu["acquisition_channel_group"] = [rng.choice(list(CHANNEL_GROUPS)) for _ in range(len(cu))]
+
+    p = t["products"]
+    p["cost_price_net"] = (p.list_price_gross / (1 + VAT) * pd.Series(_noise(rng, len(p), 0.38, 0.52))).round(2)
+    p["ean"] = [f"40{rng.randint(10**10, 10**11 - 1)}" for _ in range(len(p))]
+    p["color"] = [rng.choice(["black", "blue", "green", "red", "grey", "orange"]) for _ in range(len(p))]
+    p["weight_grams"] = [rng.randint(80, 2400) for _ in range(len(p))]
+    p["season"] = [rng.choice(["all-season", "summer", "winter"]) for _ in range(len(p))]
+    p["is_active"] = True
+
+    c = t["campaigns"]
+    c["daily_budget_eur"] = c.campaign_id.map({x[0]: float(x[4]) for x in CAMPAIGNS})
+    c["bidding_strategy"] = c.channel.map({"google_search": "target_roas", "google_shopping": "maximize_conversion_value",
+                                           "meta": "lowest_cost", "microsoft": "enhanced_cpc",
+                                           "amazon_sp": "dynamic_bids_down_only"})
+    c["target_roas"] = c.channel.map({"google_search": 4.0, "google_shopping": 3.5}).fillna(0.0)
+
+    az = t["marketplace_amazon_sales_daily"]
+    n = len(az)
+    az["units_ordered_b2b"] = (az.units_ordered * pd.Series(_noise(rng, n, 0.0, 0.12))).round().astype("int64")
+    az["ordered_product_sales_b2b"] = _ratio(az.ordered_product_sales * az.units_ordered_b2b, az.units_ordered, 2)
+    az["unit_session_percentage"] = _ratio(az.units_ordered, az.sessions)
+    az["mobile_sessions"] = (az.sessions * pd.Series(_noise(rng, n, 0.55, 0.7))).round().astype("int64")
+    az["browser_sessions"] = az.sessions - az.mobile_sessions
+
+    ws = t["web_sessions_daily"]
+    n = len(ws)
+    ws["returning_users"] = (ws.sessions * pd.Series(_noise(rng, n, 0.2, 0.4))).round().astype("int64")
+    ws["engagement_rate"] = _ratio(ws.engaged_sessions, ws.sessions)
+    ws["avg_session_duration_sec"] = [round(rng.uniform(60, 260), 1) for _ in range(n)]
+    ws["pages_per_session"] = [round(rng.uniform(1.8, 5.5), 2) for _ in range(n)]
+
+    fu = t["web_funnel_daily"]
+    fu["cart_to_purchase_rate"] = _ratio(fu.purchases, fu.add_to_carts)
+
+    lp = t["web_landing_pages_daily"]
+    n = len(lp)
+    lp["engagement_rate"] = _ratio(lp.engaged_sessions, lp.sessions)
+    lp["avg_engagement_time_sec"] = [round(rng.uniform(20, 180), 1) for _ in range(n)]
+    lp["purchase_revenue_gross"] = (lp.purchases * pd.Series(_noise(rng, n, 70, 140))).round(2)
+
+    # Second pass: the long tail of report columns nobody asks about often.
+    n = len(gs)
+    gs["absolute_top_impression_share"] = (gs.search_top_impression_share * _noise(rng, n, 0.4, 0.7)).round(4)
+    gs["average_cpm"] = _ratio(gs.cost_micros / 1e3, gs.impressions, 2)
+    gs["cross_device_conversions"] = (gs.conversions * _noise(rng, n, 0.05, 0.15)).round(2)
+    gs["new_customer_conversions"] = (gs.conversions * _noise(rng, n, 0.3, 0.6)).round(2)
+    gs["conversion_value_per_cost"] = _ratio(gs.conversion_value, gs.cost_micros / 1e6, 2)
+
+    n = len(sh)
+    sh["product_type_l2"] = sh.sku.map(lambda s: prod[s][3])
+    sh["product_price"] = sh.sku.map(lambda s: prod[s][5])
+    sh["click_share"] = [round(rng.uniform(0.1, 0.6), 4) for _ in range(n)]
+    sh["conversion_value_per_cost"] = _ratio(sh.conversion_value, sh.cost_micros / 1e6, 2)
+
+    n = len(me)
+    me["unique_link_clicks"] = (me.link_clicks * pd.Series(_noise(rng, n, 0.82, 0.95))).round().astype("int64")
+    me["outbound_clicks"] = (me.link_clicks * pd.Series(_noise(rng, n, 0.9, 1.0))).round().astype("int64")
+    me["post_engagement"] = (me.impressions * pd.Series(_noise(rng, n, 0.01, 0.04))).round().astype("int64")
+    me["cost_per_landing_page_view"] = _ratio(me.spend, me.landing_page_views, 2)
+    me["website_purchase_roas"] = _ratio(me.purchase_value, me.spend, 2)
+
+    n = len(ms)
+    ms["top_impression_share"] = (ms.impression_share * pd.Series(_noise(rng, n, 0.5, 0.8))).round(4)
+    ms["conversion_rate"] = _ratio(ms.conversions, ms.clicks)
+    ms["cost_per_conversion"] = _ratio(ms.spend, ms.conversions, 2)
+    ms["view_through_conversions"] = [rng.randint(0, 2) for _ in range(n)]
+
+    n = len(am)
+    am["units_sold_7d"] = (am.units_sold_14d * pd.Series(_noise(rng, n, 0.78, 0.92))).round().astype("int64")
+    am["sales_same_sku_7d"] = (am.attributed_sales_7d * pd.Series(_noise(rng, n, 0.7, 0.9))).round(2)
+    am["new_to_brand_sales_14d"] = _ratio(am.attributed_sales_14d * am.new_to_brand_orders_14d,
+                                          am.attributed_orders_14d, 2)
+    am["detail_page_views_14d"] = (am.clicks * pd.Series(_noise(rng, n, 0.7, 1.1))).round().astype("int64")
+
+    n = len(az)
+    az["units_refunded"] = (az.units_ordered * pd.Series(_noise(rng, n, 0.0, 0.08))).round().astype("int64")
+    az["total_order_items"] = (az.units_ordered * pd.Series(_noise(rng, n, 0.85, 1.0))).round().astype("int64")
+    az["average_selling_price"] = _ratio(az.ordered_product_sales, az.units_ordered, 2)
+
+    n = len(orders)
+    source = {"paid_search": ("google", "cpc"), "paid_shopping": ("google", "shopping"),
+              "paid_social": ("meta", "paid_social"), "organic_search": ("google", "organic"),
+              "direct": ("(direct)", "(none)"), "email": ("newsletter", "email"), "referral": ("partner", "referral")}
+    picked = [source[rng.choice(list(source))] for _ in range(n)]
+    orders["utm_source"] = [s for s, _ in picked]
+    orders["utm_medium"] = [m for _, m in picked]
+    orders["delivery_days"] = [rng.choice([1, 2, 2, 2, 3, 3, 4]) for _ in range(n)]
+
+    n = len(ws)
+    ws["bounce_rate"] = (1 - ws.engagement_rate).round(4)
+    ws["sessions_with_site_search"] = (ws.sessions * pd.Series(_noise(rng, n, 0.04, 0.12))).round().astype("int64")
 
 
 _DATE_COLUMNS = {"date", "order_date", "return_date", "first_order_date", "week_start", "month", "start_date"}

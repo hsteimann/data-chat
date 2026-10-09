@@ -147,3 +147,20 @@ def test_the_cli_prints_the_large_prompt_without_an_api_key(large_db, capsys):
     out = capsys.readouterr().out
     for name in load_catalog(LARGE.catalog).views:
         assert f"### {name}" in out
+
+
+def test_an_order_has_each_product_on_one_line_only(large):
+    """Returns join items on order_id AND sku; a repeated sku would double them."""
+    assert _one(large, """SELECT COUNT(*) FROM (SELECT order_id, sku FROM shop_order_items
+                          GROUP BY 1, 2 HAVING COUNT(*) > 1)""") == 0
+
+
+def test_every_query_pattern_runs(large):
+    from data_chat.catalog import load_catalog
+
+    catalog = load_catalog(LARGE.catalog)
+    for ex in catalog.query_examples:
+        sql = ex["sql"]
+        for table in catalog.views:
+            sql = sql.replace(f"{{{table}}}", table)
+        assert len(large.execute(sql)) > 0, ex["name"]
