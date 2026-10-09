@@ -21,6 +21,13 @@ Scoring rules (``results_match``):
 
 Column order, row order and column names are ignored.
 
+For the ``catalog_selected`` stage each outcome also records which views the
+selection step picked, and — when the question names the views its answer
+needs (``views:`` in the question file) — the selection's recall (were all of
+them picked?) and precision (how many of the picked were needed?). Every
+outcome, in every stage, records its model calls with their tokens and time,
+so the stages can be compared on cost as well as on correctness.
+
 With ``charts=True`` each question also gets its answer, and the chart spec
 is checked against the result (`chart.check_chart`): ``drawn``,
 ``no chart``, or the reason it cannot be drawn. ``chart_ok`` then says
@@ -43,7 +50,7 @@ import yaml
 
 from data_chat.backend import SqlBackend
 from data_chat.chart import check_chart
-from data_chat.context import STAGES, build_context
+from data_chat.context import STAGES, build_context, selection_setup
 from data_chat.llm import LlmClient
 from data_chat.pipeline import ask
 
@@ -56,6 +63,8 @@ class Question:
     question: str
     expected_sql: str
     trap: str = ""
+    #: The views a correct answer needs (for the selection's recall/precision).
+    views: tuple[str, ...] = ()
 
 
 @dataclass
@@ -73,6 +82,16 @@ class Outcome:
     chart_ok: bool | None = None
     #: The spec as the model wrote it, for the record.
     chart_spec: dict | None = None
+    #: Selected stage: the views the SQL prompt described (None = all) and why not.
+    selected_views: list[str] | None = None
+    selection_skipped: str | None = None
+    fallback: str | None = None
+    #: Selected stage, when the question names its views.
+    recall: float | None = None
+    precision: float | None = None
+    #: Every model call: phase, tokens, seconds.
+    steps: list = None
+    seconds: float = 0.0
 
 
 def chart_as_asked(status: str, rows: int) -> bool:
@@ -83,7 +102,19 @@ def chart_as_asked(status: str, rows: int) -> bool:
 
 def load_questions(path: str | Path) -> list[Question]:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    return [Question(**q) for q in raw["questions"]]
+    return [Question(**{**q, "views": tuple(q.get("views") or ())}) for q in raw["questions"]]
+
+
+def selection_scores(needed, picked) -> tuple[float | None, float | None]:
+    """(recall, precision) of a selection against the views a question needs.
+
+    None when nothing is known to compare: no needed views given, or no
+    selection made (the full catalog was used).
+    """
+    if not needed or picked is None:
+        return None, None
+    hit = len(set(needed) & set(picked))
+    return hit / len(set(needed)), (hit / len(set(picked)) if picked else 0.0)
 
 
 def _numeric(series: pd.Series) -> list[float] | None:
@@ -140,17 +171,22 @@ def run_eval(
     charts: bool = False,
     catalog_path: str | Path | None = None,
     freetext_path: str | Path | None = None,
+    select_model: str | None = None,
 ) -> list[Outcome]:
     outcomes = []
     paths = {k: v for k, v in (("catalog_path", catalog_path), ("freetext_path", freetext_path)) if v}
     for stage in stages:
         context = build_context(stage, backend, **paths)
+        selection = selection_setup(stage, backend, model=select_model or model,
+                                    **({"catalog_path": catalog_path} if catalog_path else {}))
         for q in questions:
             expected = backend.execute(q.expected_sql)
             result = ask(
                 q.question, llm=llm, model=model, backend=backend, context=context,
                 start_date=start_date, end_date=end_date, answer_in_words=charts,
+                selection=selection,
             )
+            recall, precision = selection_scores(q.views, result.selected_views)
             rows = 0 if result.data is None else len(result.data)
             chart = check_chart(result.chart_spec, result.data)[1] if charts else None
             outcomes.append(Outcome(
@@ -164,8 +200,26 @@ def run_eval(
                 chart=chart,
                 chart_ok=None if chart is None else chart_as_asked(chart, rows),
                 chart_spec=result.chart_spec,
+                selected_views=result.selected_views,
+                selection_skipped=result.selection_skipped,
+                fallback=result.fallback,
+                recall=recall,
+                precision=precision,
+                steps=[asdict(s) for s in result.steps],
+                seconds=round(result.seconds, 3),
             ))
     return outcomes
+
+
+def _prompt_tokens(o: Outcome, phases: tuple[str, ...]) -> int:
+    return sum(
+        s["usage"]["input_tokens"] + s["usage"]["cache_write_tokens"] + s["usage"]["cache_read_tokens"]
+        for s in (o.steps or []) if s["phase"] in phases
+    )
+
+
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
 
 
 def summary_table(outcomes: list[Outcome], questions: list[Question]) -> str:
@@ -184,6 +238,29 @@ def summary_table(outcomes: list[Outcome], questions: list[Question]) -> str:
         got = [o for o in outcomes if o.stage == s]
         totals.append(f"**{sum(o.correct for o in got)}/{len(got)}**")
     lines.append("| **correct** | " + " | ".join(totals) + " |")
+    if any(o.steps for o in outcomes):
+        def row(label, fn, fmt):
+            cells = []
+            for s in stages:
+                v = _mean([x for x in (fn(o) for o in outcomes if o.stage == s) if x is not None])
+                cells.append("—" if v is None else fmt(v))
+            lines.append(f"| {label} | " + " | ".join(cells) + " |")
+
+        row("prompt tokens / question, selection", lambda o: _prompt_tokens(o, ("select",)), lambda v: f"{v:,.0f}")
+        row("prompt tokens / question, SQL", lambda o: _prompt_tokens(o, ("sql",)), lambda v: f"{v:,.0f}")
+        row("seconds / question", lambda o: o.seconds or None, lambda v: f"{v:.1f}")
+    if any(o.recall is not None for o in outcomes):
+        cells = []
+        for s in stages:
+            got = [o for o in outcomes if o.stage == s and o.recall is not None]
+            cells.append(f"{_mean([o.recall for o in got]):.0%} / {_mean([o.precision for o in got]):.0%}"
+                         if got else "—")
+        lines.append("| selection recall / precision | " + " | ".join(cells) + " |")
+        cells = []
+        for s in stages:
+            got = [o for o in outcomes if o.stage == s and o.selected_views is not None]
+            cells.append(f"{sum(o.fallback is not None for o in got)}/{len(got)}" if got else "—")
+        lines.append("| fell back to the full catalog | " + " | ".join(cells) + " |")
     if any(o.chart is not None for o in outcomes):
         asked = []
         for s in stages:

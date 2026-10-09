@@ -45,6 +45,11 @@ def answer_page(result: Answer, *, model: str, stage: str) -> str:
     parts = [f"<h1>{esc(result.question)}</h1>",
              f"<p class='note'>stage: {esc(stage)} · model: {esc(model)}"
              + (" · retried once" if result.retried else "") + "</p>"]
+    if result.selected_views is not None or result.selection_skipped:
+        views = ", ".join(result.selected_views or []) or f"all ({result.selection_skipped})"
+        parts += ["<h2>Views the SQL step saw</h2>", f"<p>{esc(views)}</p>"]
+        if result.fallback:
+            parts.append(f"<p class='note'>Fell back to the full catalog: {esc(result.fallback)}</p>")
     if result.sql:
         parts += ["<h2>SQL</h2>", f"<pre>{esc(result.sql)}</pre>"]
     if result.failure:

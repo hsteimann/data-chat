@@ -26,6 +26,8 @@ class Dataset:
     questions: Path
     #: The module with ``build_tables``, ``write_duckdb``, ``START`` and ``END``.
     generator: str
+    #: What ``data-chat eval`` runs without --stage.
+    default_stages: tuple[str, ...] = ("schema", "freetext", "catalog")
 
     def _module(self):
         return import_module(self.generator)
@@ -55,6 +57,7 @@ DATASETS = {
         freetext=REPO_ROOT / "catalog" / "demo-large" / "freetext.md",
         questions=REPO_ROOT / "eval" / "demo-large" / "questions.yaml",
         generator="data_chat.demo_large",
+        default_stages=("catalog", "catalog_selected"),
     ),
 }
 

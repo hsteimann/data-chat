@@ -6,6 +6,11 @@
     data-chat ask "What was our ad spend in August 2026?" --stage catalog
     data-chat ask "Ad spend per channel in August 2026?" --chart answer.html
     data-chat eval                            # all questions × all three stages
+    data-chat --dataset demo-large ask "Ad spend per channel in August 2026?" --stage catalog_selected
+    data-chat --dataset demo-large eval       # catalog against catalog_selected
+
+DATA_CHAT_SELECT_MODEL sets the model of the selection step (default: the
+same model as the SQL step).
 """
 
 from __future__ import annotations
@@ -15,7 +20,9 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from data_chat.context import REPO_ROOT, STAGES, build_context
+import os
+
+from data_chat.context import REPO_ROOT, STAGES, build_context, selection_setup
 from data_chat.datasets import DATASETS, get_dataset
 
 
@@ -23,6 +30,10 @@ from data_chat.datasets import DATASETS, get_dataset
 def _context(args, stage: str, backend) -> str:
     ds = get_dataset(args.dataset)
     return build_context(stage, backend, freetext_path=ds.freetext, catalog_path=ds.catalog)
+
+
+def _select_model(model: str) -> str:
+    return os.environ.get("DATA_CHAT_SELECT_MODEL") or model
 
 
 def _backend(args):
@@ -53,6 +64,17 @@ def cmd_prompt(args) -> None:
     from data_chat.prompts import sql_system_prompt
 
     backend = _backend(args)
+    if args.selection or args.views:
+        from data_chat.catalog import load_catalog, render_catalog
+        from data_chat.selection import selection_prompt
+
+        catalog = load_catalog(get_dataset(args.dataset).catalog)
+        if args.selection:
+            print(selection_prompt(catalog))
+            return
+        views = [v.strip() for v in args.views.split(",") if v.strip()]
+        print(sql_system_prompt(backend.dialect, render_catalog(catalog, qualify=backend.qualify, views=views)))
+        return
     print(sql_system_prompt(backend.dialect, _context(args, args.stage, backend)))
 
 
@@ -66,8 +88,15 @@ def cmd_ask(args) -> None:
     result = ask(
         args.question, llm=llm, model=model, backend=backend,
         context=_context(args, args.stage, backend), start_date=start, end_date=end,
+        selection=selection_setup(args.stage, backend, model=_select_model(model),
+                                  catalog_path=get_dataset(args.dataset).catalog),
     )
     print(f"-- stage: {args.stage} · model: {model}" + (" · retried once" if result.retried else ""))
+    if args.stage == "catalog_selected":
+        print(f"-- views: {', '.join(result.selected_views or []) or 'all (' + (result.selection_skipped or '') + ')'}"
+              + (f" · fell back to the full catalog: {result.fallback}" if result.fallback else ""))
+    tokens = sum(s.usage.prompt_tokens for s in result.steps)
+    print(f"-- {len(result.steps)} model calls · {tokens:,} prompt tokens · {result.seconds:.1f} s")
     if result.sql:
         print(result.sql)
     if result.failure:
@@ -96,18 +125,19 @@ def cmd_eval(args) -> None:
     start, end = _period(args)
     questions_path = args.questions or get_dataset(args.dataset).questions
     questions = load_questions(questions_path)
-    stages = tuple(args.stage) if args.stage else STAGES
+    stages = tuple(args.stage) if args.stage else get_dataset(args.dataset).default_stages
     outcomes = run_eval(
         questions, llm=llm, model=model, backend=backend, stages=stages,
         start_date=start, end_date=end, charts=args.charts,
         catalog_path=get_dataset(args.dataset).catalog, freetext_path=get_dataset(args.dataset).freetext,
+        select_model=_select_model(model),
     )
     print(summary_table(outcomes, questions))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = write_outcomes(
         outcomes,
         REPO_ROOT / "eval" / "results" / f"{stamp}.json",
-        {"model": model, "dataset": args.dataset, "stages": list(stages), "questions": str(questions_path),
+        {"model": model, "select_model": _select_model(model), "dataset": args.dataset, "stages": list(stages), "questions": str(questions_path),
          "charts": args.charts, "run_at": stamp},
     )
     print(f"\nPer-question SQL and errors: {path}")
@@ -126,6 +156,9 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("prompt", help="print the SQL system prompt for a stage")
     p.add_argument("--stage", choices=STAGES, default="catalog")
+    p.add_argument("--selection", action="store_true",
+                   help="print the selection step's prompt (the view cards) instead")
+    p.add_argument("--views", metavar="A,B", help="print the SQL prompt narrowed to these views")
     p.set_defaults(func=cmd_prompt)
 
     for name, func, helptext in (("ask", cmd_ask, "answer one question"),
@@ -138,7 +171,8 @@ def main(argv: list[str] | None = None) -> None:
                            help="write the answer with its chart as an HTML page (needs --extra chart)")
         else:
             p.add_argument("--stage", choices=STAGES, action="append",
-                           help="repeatable; default: all three")
+                           help="repeatable; default: the dataset's (demo: the first three, "
+                                "demo-large: catalog and catalog_selected)")
             p.add_argument("--questions", type=Path, help="default: the dataset's question set")
             p.add_argument("--charts", action="store_true",
                            help="also ask for the answer and check its chart spec (one more call per question)")
