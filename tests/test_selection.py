@@ -40,15 +40,15 @@ class FakeLlm:
         self.calls: list[dict] = []
 
     def call_tool(self, **kw):
-        self.calls.append(kw)
-        if self.fail:
-            raise RuntimeError("overloaded")
-        out = ToolInput({"views": self.pick or []})
-        out.usage = Usage(input_tokens=20, output_tokens=12, cache_read_tokens=4000)
-        return out
+        raise AssertionError("selection uses structured output, not a tool call")
 
     def complete(self, **kw):
         self.calls.append(kw)
+        if kw["phase"] == "select":
+            if self.fail:
+                raise RuntimeError("overloaded")
+            text = self.pick if isinstance(self.pick, str) else json.dumps({"views": self.pick or []})
+            return LlmReply(text, "end_turn", Usage(input_tokens=20, output_tokens=12, cache_read_tokens=4000))
         if kw["phase"] == "sql":
             text = self.sql.pop(0) if len(self.sql) > 1 else self.sql[0]
             return LlmReply(text, "end_turn", Usage(input_tokens=len(kw["system"]) // 4, output_tokens=60))
@@ -79,12 +79,19 @@ def test_the_selection_prompt_is_the_same_for_every_question(catalog):
     assert llm.calls[0]["messages"] != llm.calls[1]["messages"]
 
 
-def test_the_tool_only_accepts_the_catalogs_view_names(catalog):
+def test_the_structured_output_only_allows_the_catalogs_view_names(catalog):
     llm = FakeLlm(pick=["shop_sales_daily"])
     select_views("q", catalog, llm=llm, model="small")
-    enum = llm.calls[0]["tool"]["input_schema"]["properties"]["views"]["items"]["enum"]
-    assert enum == sorted(catalog.views)
+    fmt = llm.calls[0]["output_format"]
+    assert fmt["type"] == "json_schema"
+    assert fmt["schema"]["properties"]["views"]["items"]["enum"] == sorted(catalog.views)
+    assert fmt["schema"]["additionalProperties"] is False
     assert llm.calls[0]["phase"] == "select" and llm.calls[0]["model"] == "small"
+
+
+def test_an_unreadable_reply_is_no_selection(catalog):
+    sel = select_views("q", catalog, llm=FakeLlm(pick="shop_sales_daily, products"), model="small")
+    assert sel.views is None and sel.skipped.startswith("selection failed")
 
 
 def test_an_invented_name_is_dropped_and_nothing_left_means_the_full_catalog(catalog):
@@ -233,6 +240,39 @@ def test_questions_without_views_still_load(tmp_path):
 
 
 # ── the adapters carry usage ───────────────────────────────────────────────
+
+def test_anthropic_sends_structured_output_as_output_config():
+    seen = {}
+
+    def create(**kw):
+        seen.update(kw)
+        return SimpleNamespace(stop_reason="end_turn", usage=None,
+                               content=[SimpleNamespace(type="text", text='{"views": ["a"]}')])
+
+    fmt = {"type": "json_schema", "schema": {"type": "object"}}
+    reply = AnthropicLlm(SimpleNamespace(messages=SimpleNamespace(create=create))).complete(
+        phase="select", model="m", system="S", messages=[], max_tokens=5, output_format=fmt)
+    assert seen["output_config"] == {"format": fmt} and json.loads(reply.text) == {"views": ["a"]}
+    seen.clear()
+    AnthropicLlm(SimpleNamespace(messages=SimpleNamespace(create=create))).complete(
+        phase="sql", model="m", system="S", messages=[], max_tokens=5)
+    assert "output_config" not in seen  # the SQL step is unchanged
+
+
+def test_openai_sends_structured_output_as_a_strict_json_schema():
+    seen = {}
+
+    def create(**kw):
+        seen.update(kw)
+        return SimpleNamespace(usage=None, choices=[SimpleNamespace(
+            finish_reason="stop", message=SimpleNamespace(content='{"views": []}'))])
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    OpenAILlm(client).complete(phase="select", model="m", system="S", messages=[], max_tokens=5,
+                               output_format={"type": "json_schema", "schema": {"type": "object"}})
+    assert seen["response_format"] == {"type": "json_schema", "json_schema": {
+        "name": "select", "schema": {"type": "object"}, "strict": True}}
+
 
 def test_anthropic_usage_and_tool_input():
     usage = SimpleNamespace(input_tokens=7, output_tokens=3, cache_creation_input_tokens=100,

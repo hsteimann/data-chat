@@ -9,6 +9,11 @@ completion; ``call_tool`` is kept so the interface matches the Brain's.
 say what each step cost. A forced tool call returns its input as a
 ``ToolInput`` — a plain dict, as in the Brain, that also carries ``usage``.
 
+``complete(output_format=…)`` asks for structured output, as the Brain's
+port does: ``{"type": "json_schema", "schema": {...}}``, and the reply text
+is JSON valid against that schema. The selection step uses it rather than a
+forced tool call, which the newest models no longer accept.
+
 The adapters are new. Which one is used is configuration, not code:
 
     DATA_CHAT_LLM_PROVIDER = anthropic (default) | openai
@@ -109,6 +114,7 @@ class LlmClient(Protocol):
         messages: list[dict],
         max_tokens: int,
         cache_system: bool = True,
+        output_format: dict | None = None,
     ) -> LlmReply: ...
 
     def call_tool(
@@ -134,7 +140,8 @@ class AnthropicLlm:
             client = anthropic.Anthropic()
         self._client = client
 
-    def complete(self, *, phase, model, system, messages, max_tokens, cache_system=True):
+    def complete(self, *, phase, model, system, messages, max_tokens, cache_system=True,
+                 output_format=None):
         response = self._client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -144,6 +151,7 @@ class AnthropicLlm:
                 else system
             ),
             messages=messages,
+            **({"output_config": {"format": output_format}} if output_format else {}),
         )
         text = "".join(b.text for b in response.content if b.type == "text")
         return LlmReply(text=text, stop_reason=response.stop_reason, usage=_anthropic_usage(response))
@@ -180,11 +188,19 @@ class OpenAILlm:
             client = openai.OpenAI()
         self._client = client
 
-    def complete(self, *, phase, model, system, messages, max_tokens, cache_system=True):
+    def complete(self, *, phase, model, system, messages, max_tokens, cache_system=True,
+                 output_format=None):
+        extra = {}
+        if output_format:
+            extra["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": phase, "schema": output_format["schema"], "strict": True},
+            }
         response = self._client.chat.completions.create(
             model=model,
             max_completion_tokens=max_tokens,
             messages=[{"role": "system", "content": system}, *messages],
+            **extra,
         )
         choice = response.choices[0]
         stop = "max_tokens" if choice.finish_reason == "length" else choice.finish_reason

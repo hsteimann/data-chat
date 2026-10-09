@@ -12,10 +12,11 @@ here rather than copied:
 - **Input:** one card per view — name, description, grain, what it is for, up
   to three typical questions, and the column NAMES. Not the column
   definitions: those are what the SQL step reads.
-- **Output:** a forced tool call whose only argument is a list of view names
-  restricted to the catalog's views (``enum``), so a name the catalog does
-  not have cannot come back. No reasons: what was picked is shown next to the
-  SQL and the answer instead.
+- **Output:** structured output (``output_format``, JSON schema), as in the
+  Brain: an object whose only field is a list of view names restricted to the
+  catalog's views (``enum``), so a name the catalog does not have cannot come
+  back. No reasons: what was picked is shown next to the SQL and the answer
+  instead.
 - **The instruction leans towards including:** a missing view makes the
   question unanswerable, an extra one only costs tokens.
 - **Below ``MIN_VIEWS`` views nothing is selected** — the whole catalog is
@@ -33,6 +34,7 @@ is specific to its sources.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 
@@ -42,13 +44,11 @@ from data_chat.llm import NO_USAGE, LlmClient, Usage
 #: Fewer views than this are not narrowed (the Brain's threshold).
 MIN_VIEWS = 12
 
-TOOL_NAME = "pick_views"
-
 SYSTEM = """You choose the database views a SQL query needs to answer an analyst's question about a shop's sales, advertising and web analytics data. A second model writes the SQL afterwards and will see ONLY the views you choose, described in full.
 
 Choose every view the query may need: the view or views that hold the metrics asked for, and any view it has to JOIN for names, categories or other attributes. When you are unsure whether a view is needed, include it — a missing view makes the question unanswerable, an extra one only costs a little. Most questions need one to three views.
 
-Answer by calling the tool {tool} with the names of the views.
+Reply with the names of the views.
 
 ## The views
 {cards}"""
@@ -71,22 +71,17 @@ def card(view: CatalogView) -> str:
 def selection_prompt(catalog: Catalog) -> str:
     """The system prompt: the same for every question, so it caches."""
     cards = "\n\n".join(card(catalog.views[n]) for n in sorted(catalog.views))
-    return SYSTEM.format(tool=TOOL_NAME, cards=cards)
+    return SYSTEM.format(cards=cards)
 
 
-def tool(names: list[str]) -> dict:
-    return {
-        "name": TOOL_NAME,
-        "description": "The views the SQL query needs.",
-        "input_schema": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["views"],
-            "properties": {
-                "views": {"type": "array", "items": {"type": "string", "enum": names}},
-            },
-        },
-    }
+def output_format(names: list[str]) -> dict:
+    """The reply: view names from the catalog only."""
+    return {"type": "json_schema", "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["views"],
+        "properties": {"views": {"type": "array", "items": {"type": "string", "enum": names}}},
+    }}
 
 
 @dataclass
@@ -120,16 +115,16 @@ def select_views(
         user = f"Previous question in this conversation: {previous_question}\n\n{user}"
     started = time.perf_counter()
     try:
-        reply = llm.call_tool(
+        reply = llm.complete(
             phase="select",
             model=model,
             system=selection_prompt(catalog),
             messages=[{"role": "user", "content": user}],
-            tool=tool(names),
             max_tokens=1024,
+            output_format=output_format(names),
         )
         usage = getattr(reply, "usage", NO_USAGE)
-        picked = sorted({v for v in reply.get("views") or [] if v in catalog.views})
+        picked = sorted({v for v in json.loads(reply.text)["views"] if v in catalog.views})
     except Exception as e:  # any failure is "no selection", never a failed question
         return Selection(None, f"selection failed: {e}", seconds=time.perf_counter() - started)
     seconds = time.perf_counter() - started
