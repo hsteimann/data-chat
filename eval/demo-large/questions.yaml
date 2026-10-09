@@ -1,0 +1,210 @@
+# Evaluation questions for the GENERATED large demo data (demo-large).
+#
+# `expected_sql` is the reference query (DuckDB); the expected answer is
+# computed by running it on the same database file, so it cannot drift from
+# the data. `trap` names what makes a plausible query wrong — documentation
+# for the reader, not used by the scorer. `views` lists what a correct answer
+# needs, one entry per role; `a|b` means either view will do. The selection
+# step's recall and precision are scored against it.
+#
+# Written and fixed on 2026-10-09 before the first run; not changed after
+# seeing any result.
+
+questions:
+  - id: net_revenue_august
+    question: What was our net revenue in August 2026?
+    trap: revenue without a qualifier means net web-shop revenue; gross, v1 (cancelled orders and shipping included) and marketplaces are all plausible
+    views: [shop_sales_daily|shop_sales_monthly|shop_orders]
+    expected_sql: |
+      SELECT SUM(revenue_net) AS revenue_net
+      FROM shop_sales_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: revenue_after_returns_august
+    question: What was our net revenue after returns in August 2026?
+    trap: the table that already deducts refunds; computing it from shop_returns by order date gives another number
+    views: [shop_sales_net_of_returns_daily]
+    expected_sql: |
+      SELECT SUM(revenue_net_after_returns) AS revenue_net_after_returns
+      FROM shop_sales_net_of_returns_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: orders_week_aug_10
+    question: How many orders did we receive in the week from Monday 10 August to Sunday 16 August 2026?
+    trap: cancelled orders are in shop_orders and in the deprecated v1 table
+    views: [shop_sales_daily|shop_sales_weekly|shop_orders]
+    expected_sql: |
+      SELECT SUM(orders) AS orders
+      FROM shop_sales_daily
+      WHERE date BETWEEN '2026-08-10' AND '2026-08-16'
+
+  - id: avg_order_value_july
+    question: What was the average net order value in July 2026?
+    trap: averaging the per-day avg_order_value_net column instead of a ratio of sums
+    views: [shop_sales_daily|shop_sales_monthly|shop_orders]
+    expected_sql: |
+      SELECT SUM(revenue_net) / SUM(orders) AS avg_order_value_net
+      FROM shop_sales_daily
+      WHERE date BETWEEN '2026-07-01' AND '2026-07-31'
+
+  - id: new_customer_orders_september
+    question: How many orders came from new customers in September 2026?
+    trap: counting customers by first_order_date includes customers whose first order was cancelled
+    views: [shop_sales_daily|shop_sales_monthly|shop_orders]
+    expected_sql: |
+      SELECT SUM(new_customer_orders) AS new_customer_orders
+      FROM shop_sales_daily
+      WHERE date BETWEEN '2026-09-01' AND '2026-09-27'
+
+  - id: total_ad_spend_august
+    question: What was our total ad spend across all channels in August 2026?
+    trap: the deprecated v1 table covers two channels in cents; per-channel tables mix micros and euros
+    views: [ads_all_channels_daily|ads_all_channels_monthly]
+    expected_sql: |
+      SELECT SUM(cost_eur) AS spend_eur
+      FROM ads_all_channels_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: google_search_spend_july
+    question: How much did we spend on Google search ads in July 2026, in euros?
+    trap: cost_micros must be divided by 1,000,000; Google Shopping is a different table
+    views: [ads_google_search_campaign_daily|ads_all_channels_daily|ads_all_channels_monthly]
+    expected_sql: |
+      SELECT SUM(cost_micros) / 1e6 AS spend_eur
+      FROM ads_google_search_campaign_daily
+      WHERE date BETWEEN '2026-07-01' AND '2026-07-31'
+
+  - id: meta_roas_by_campaign_august
+    question: What was the ROAS of each Meta campaign in August 2026?
+    trap: averaging the per-row website_purchase_roas instead of SUM(purchase_value) / SUM(spend)
+    views: [ads_meta_campaign_daily]
+    expected_sql: |
+      SELECT campaign_name, SUM(purchase_value) / SUM(spend) AS roas
+      FROM ads_meta_campaign_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+      GROUP BY campaign_name
+
+  - id: amazon_acos_august
+    question: What was the ACoS of our Amazon Sponsored Products ads in August 2026?
+    trap: averaging acos_14d, mixing the 7- and 14-day windows
+    views: [ads_amazon_sp_campaign_daily]
+    expected_sql: |
+      SELECT SUM(cost) / SUM(attributed_sales_14d) AS acos
+      FROM ads_amazon_sp_campaign_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: cpc_by_channel_september
+    question: What was the average cost per click of each ad channel in September 2026?
+    trap: averaging the per-row cpc column instead of SUM(cost) / SUM(clicks)
+    views: [ads_all_channels_daily|ads_all_channels_monthly]
+    expected_sql: |
+      SELECT channel, SUM(cost_eur) / SUM(clicks) AS cpc_eur
+      FROM ads_all_channels_daily
+      WHERE date BETWEEN '2026-09-01' AND '2026-09-27'
+      GROUP BY channel
+
+  - id: budget_utilisation_august
+    question: For each ad channel, what share of its planned August 2026 budget did we actually spend?
+    trap: daily_budget_eur in campaigns is a setting, not the monthly plan; the budget table holds no spend
+    views: [marketing_budget_monthly, ads_all_channels_monthly|ads_all_channels_daily]
+    expected_sql: |
+      SELECT b.channel, a.cost_eur / b.planned_budget_eur AS utilisation
+      FROM marketing_budget_monthly b
+      JOIN ads_all_channels_monthly a ON a.month = b.month AND a.channel = b.channel
+      WHERE b.month = '2026-08-01'
+
+  - id: purchases_by_channel_august
+    question: How many web-shop purchases did each channel group bring in August 2026?
+    trap: three attribution tables with the same total; platform conversions in the ad tables; utm fields in shop_orders
+    views: [web_conversions_last_click_daily]
+    expected_sql: |
+      SELECT channel_group, SUM(purchases) AS purchases
+      FROM web_conversions_last_click_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+      GROUP BY channel_group
+
+  - id: first_click_paid_social_july
+    question: Under first-click attribution, how many purchases did paid social start in July 2026?
+    trap: the last-click table is the default and sits next to it
+    views: [web_conversions_first_click_daily]
+    expected_sql: |
+      SELECT SUM(purchases) AS purchases
+      FROM web_conversions_first_click_daily
+      WHERE channel_group = 'paid_social' AND date BETWEEN '2026-07-01' AND '2026-07-31'
+
+  - id: conversion_rate_by_channel_august
+    question: What was the conversion rate (purchases per session) of each channel group in August 2026?
+    trap: sessions and purchases live in two tables; joining per day before summing is fine, averaging daily rates is not
+    views: [web_sessions_daily, web_conversions_last_click_daily]
+    expected_sql: |
+      WITH s AS (SELECT channel_group, SUM(sessions) AS sessions FROM web_sessions_daily
+                 WHERE date BETWEEN '2026-08-01' AND '2026-08-31' GROUP BY channel_group),
+           p AS (SELECT channel_group, SUM(purchases) AS purchases FROM web_conversions_last_click_daily
+                 WHERE date BETWEEN '2026-08-01' AND '2026-08-31' GROUP BY channel_group)
+      SELECT s.channel_group, p.purchases / s.sessions AS conversion_rate
+      FROM s JOIN p USING (channel_group)
+
+  - id: daily_sessions_august
+    question: How many website sessions did we have per day on average in August 2026?
+    trap: one row per day and channel group — AVG(sessions) is a per-channel average
+    views: [web_sessions_daily]
+    expected_sql: |
+      SELECT SUM(sessions) / COUNT(DISTINCT date) AS sessions_per_day
+      FROM web_sessions_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: mobile_cart_abandonment_august
+    question: What was the cart abandonment rate on mobile in August 2026?
+    trap: averaging cart_to_purchase_rate per day; using shop_orders.device instead of the analytics funnel
+    views: [web_funnel_daily]
+    expected_sql: |
+      SELECT 1 - SUM(purchases) / SUM(add_to_carts) AS cart_abandonment_rate
+      FROM web_funnel_daily
+      WHERE device = 'mobile' AND date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: return_rate_by_category_june
+    question: What share of the units ordered in June 2026 was returned, per product category?
+    trap: returns are dated by arrival; items of cancelled orders; joining returns on order_id alone multiplies them
+    views: [shop_order_items, shop_orders, shop_returns, products]
+    expected_sql: |
+      SELECT p.category,
+             SUM(COALESCE(r.units_returned, 0)) / SUM(i.units) AS return_rate
+      FROM shop_order_items i
+      JOIN shop_orders o ON o.order_id = i.order_id AND o.order_status = 'completed'
+      LEFT JOIN shop_returns r ON r.order_id = i.order_id AND r.sku = i.sku
+      JOIN products p ON p.sku = i.sku
+      WHERE i.order_date BETWEEN '2026-06-01' AND '2026-06-30'
+      GROUP BY p.category
+
+  - id: top_products_august
+    question: Which 5 products had the highest net revenue in the web shop in August 2026?
+    trap: product names only in products; marketplace sales are not web-shop sales
+    views: [shop_product_sales_daily, products]
+    expected_sql: |
+      SELECT p.product_name, SUM(s.revenue_net) AS revenue_net
+      FROM shop_product_sales_daily s
+      JOIN products p USING (sku)
+      WHERE s.date BETWEEN '2026-08-01' AND '2026-08-31'
+      GROUP BY p.product_name
+      ORDER BY revenue_net DESC
+      LIMIT 5
+
+  - id: marketplace_revenue_august
+    question: What was our total gross revenue on the marketplaces, Amazon and Otto together, in August 2026?
+    trap: Otto's own table is net; adding it to Amazon's gross figure understates the total
+    views: [marketplace_sales_daily]
+    expected_sql: |
+      SELECT SUM(revenue_gross) AS revenue_gross
+      FROM marketplace_sales_daily
+      WHERE date BETWEEN '2026-08-01' AND '2026-08-31'
+
+  - id: gross_margin_by_brand_july
+    question: What was the gross margin per brand in the web shop in July 2026 (net revenue minus purchase cost)?
+    trap: cost_price_net must be set against NET revenue; margin needs units from the sales table and cost from products
+    views: [shop_product_sales_daily, products]
+    expected_sql: |
+      SELECT p.brand, SUM(s.revenue_net) - SUM(s.units_ordered * p.cost_price_net) AS gross_margin
+      FROM shop_product_sales_daily s
+      JOIN products p USING (sku)
+      WHERE s.date BETWEEN '2026-07-01' AND '2026-07-31'
+      GROUP BY p.brand

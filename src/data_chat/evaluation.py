@@ -108,13 +108,21 @@ def load_questions(path: str | Path) -> list[Question]:
 def selection_scores(needed, picked) -> tuple[float | None, float | None]:
     """(recall, precision) of a selection against the views a question needs.
 
+    Each needed entry is a view, or equivalent views separated by ``|``
+    (``shop_sales_daily|shop_sales_monthly``): picking any one of them covers
+    the entry. Recall = covered entries / entries; precision = picked views
+    that appear in some entry / picked views.
+
     None when nothing is known to compare: no needed views given, or no
     selection made (the full catalog was used).
     """
     if not needed or picked is None:
         return None, None
-    hit = len(set(needed) & set(picked))
-    return hit / len(set(needed)), (hit / len(set(picked)) if picked else 0.0)
+    entries = [set(e.split("|")) for e in needed]
+    picked = set(picked)
+    covered = sum(bool(e & picked) for e in entries)
+    useful = picked & set().union(*entries)
+    return covered / len(entries), (len(useful) / len(picked) if picked else 0.0)
 
 
 def _numeric(series: pd.Series) -> list[float] | None:

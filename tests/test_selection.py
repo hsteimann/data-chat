@@ -294,3 +294,12 @@ def test_openai_usage_splits_cached_tokens():
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: response)))
     reply = OpenAILlm(client).complete(phase="sql", model="m", system="S", messages=[], max_tokens=5)
     assert reply.usage == Usage(input_tokens=200, output_tokens=20, cache_read_tokens=800)
+
+
+def test_equivalent_views_cover_one_entry():
+    from data_chat.evaluation import selection_scores
+
+    needed = ("shop_sales_daily|shop_sales_monthly", "products")
+    assert selection_scores(needed, ["shop_sales_monthly", "products"]) == (1.0, 1.0)
+    assert selection_scores(needed, ["shop_sales_daily", "shop_orders"]) == (0.5, 0.5)
+    assert selection_scores(needed, None) == (None, None)

@@ -164,3 +164,20 @@ def test_every_query_pattern_runs(large):
         for table in catalog.views:
             sql = sql.replace(f"{{{table}}}", table)
         assert len(large.execute(sql)) > 0, ex["name"]
+
+
+def test_the_question_set_is_consistent(large):
+    """Every reference query runs and returns rows, names only views the
+    question lists as needed, and every listed view exists."""
+    from data_chat.catalog import tables_in
+    from data_chat.evaluation import load_questions
+
+    catalog = load_catalog(LARGE.catalog)
+    questions = load_questions(LARGE.questions)
+    assert 15 <= len(questions) <= 20 and len({q.id for q in questions}) == len(questions)
+    for q in questions:
+        listed = {v for entry in q.views for v in entry.split("|")}
+        assert listed <= set(catalog.views), q.id
+        used = tables_in(q.expected_sql, catalog.views)
+        assert used <= listed, (q.id, used - listed)
+        assert len(large.execute(q.expected_sql)) > 0, q.id
