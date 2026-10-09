@@ -12,9 +12,16 @@
              and, where misuse would give a plausible wrong number, a
              definition. The Brain's state from 2026-05-07 on (``definition``
              on every column, ``history/config/data_catalog.yaml``).
+``catalog_selected``
+             The same catalog, but only the views a first step picked for the
+             question (``selection.py``) — the Brain's view router from
+             2026-10-06. Its context block is chosen per question by
+             ``pipeline.ask``; ``build_context`` returns the full catalog,
+             which is what it falls back to.
 
-The only thing that changes between the stages is this block. The question,
-the rules, the model and the database stay the same.
+Between the first three stages only this block changes. The question, the
+rules, the model and the database stay the same. The fourth adds a step in
+front of the SQL step and changes the block per question.
 """
 
 from __future__ import annotations
@@ -24,7 +31,9 @@ from pathlib import Path
 from data_chat.backend import SqlBackend
 from data_chat.catalog import load_catalog, render_catalog
 
-STAGES = ("schema", "freetext", "catalog")
+STAGES = ("schema", "freetext", "catalog", "catalog_selected")
+#: The stage that selects views per question before the SQL step.
+SELECTED = "catalog_selected"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FREETEXT = REPO_ROOT / "catalog" / "freetext.md"
@@ -53,6 +62,16 @@ def build_context(
     if stage == "freetext":
         note = Path(freetext_path).read_text(encoding="utf-8").strip()
         return render_schema(backend) + "\n## Notes on the data\n\n" + note + "\n"
-    if stage == "catalog":
+    if stage in ("catalog", SELECTED):
         return render_catalog(load_catalog(catalog_path), qualify=backend.qualify)
     raise ValueError(f"unknown stage {stage!r} — use one of {STAGES}")
+
+
+def selection_setup(stage: str, backend: SqlBackend, *, model: str,
+                    catalog_path: str | Path = DEFAULT_CATALOG):
+    """The ``SelectionSetup`` for the selected stage, None for the others."""
+    if stage != SELECTED:
+        return None
+    from data_chat.pipeline import SelectionSetup
+
+    return SelectionSetup(catalog=load_catalog(catalog_path), model=model, qualify=backend.qualify)

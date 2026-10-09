@@ -85,6 +85,15 @@ uv run data-chat ask "What was our ad spend per channel in August 2026?" --chart
 uv run data-chat eval --stage catalog --charts   # also checks each chart spec
 ```
 
+The larger dataset and the fourth stage (see [below](#the-fourth-stage-only-the-views-the-question-needs)):
+
+```bash
+uv run data-chat --dataset demo-large demo-data                   # data/demo-large.duckdb, 35 tables (generated)
+uv run data-chat --dataset demo-large prompt --selection          # the selection step's prompt, no API key
+uv run data-chat --dataset demo-large ask "What was our net revenue after returns in August 2026?" --stage catalog_selected
+uv run data-chat --dataset demo-large eval                        # 20 questions × catalog and catalog_selected
+```
+
 Other providers: `uv sync --extra openai` and `DATA_CHAT_LLM_PROVIDER=openai` (plus `OPENAI_BASE_URL` for a compatible gateway). Choose the model with `DATA_CHAT_MODEL`. BigQuery: `uv sync --extra bigquery`, then `--bigquery PROJECT.DATASET`.
 
 ## The three stages
@@ -141,6 +150,75 @@ Read these numbers with their limits:
 - **Free text = schema here.** The free-text note is table level, and every miss above is a field-level trap, so the note changes nothing. In the Brain's own history, free text was the step up from *no* context at all. This setup does not measure that step: its baseline already has the table and column names.
 - **Scored on the result table** (`src/data_chat/evaluation.py`), not on the prose answer.
 
+## The fourth stage: only the views the question needs
+
+The three stages above ask how **well** the data has to be described. The fourth asks how **much** of that description the model should see for one question.
+
+A real client's platform has dozens of views, and their catalog entries are long. Putting all of them into every SQL prompt is expensive, and the views that are easy to confuse all sit next to each other. The Nakoa Brain therefore runs a step first (since 2026-10-06): a small model reads one short card per view and names the views the question needs; the SQL prompt then describes only those.
+
+`catalog_selected` does the same here, re-described rather than copied from the Brain (`src/data_chat/selection.py`):
+
+1. **Selection.** One card per view: description, grain, what it is for, up to three typical questions, the column *names*. Not the column definitions; those are for the SQL step. The reply is structured output: a list of view names, restricted to the catalog's views by the schema, so an invented name cannot come back. The prompt leans towards including, because a missing view makes the question unanswerable and an extra one only costs tokens. The cards are the same for every question, so this prompt is cached.
+2. **SQL.** The catalog, but only the selected views, and only the joins and query patterns among them. The general notes stay.
+3. **Interpretation.** The question, the result and the catalog entries of the views the query actually used.
+
+The selected views are shown next to the SQL and the answer (`ask`, `ask --chart`), so it is visible what the answer rests on.
+
+**Fallbacks**, as in the Brain: no selection below 12 views; a failed or empty selection runs on the full catalog; a narrowed prompt that yields no query on the catalog's tables is asked once more with the full catalog; the retry after a database error always gets the full catalog. **Left out**, because a demo has nothing to feed them: the Brain always adds a client's two most-used views (from its query log) and the previous turn's views, and it has a keyword rule for revenue questions that is specific to its sources.
+
+### The large dataset
+
+Five tables cannot show this, so `demo-large` describes the same fictional shop the way a client's platform sees it: own web shop, two marketplaces, five ad channels and web analytics. It has **35 tables and 300 columns**, all **generated** (`src/data_chat/demo_large.py`, fixed seed). It is built to be confusable, as real data is:
+
+- the same figures as a daily, a weekly and a monthly table;
+- one table per ad channel with similar columns, in micros, cents or euros, and a cross-channel table whose conversions mix attribution windows;
+- gross and net revenue, revenue before and after returns, and a marketplace that reports net next to one that reports gross;
+- the shop's orders under last-click, first-click and data-driven attribution, with the same total and a different split per channel;
+- two deprecated `*_v1` tables next to their successors;
+- tables close to a question's subject that do not answer it (inventory, fees, site search, email, budgets);
+- the columns real exports carry, many of them precomputed per-row ratios (`ctr`, `acos_14d`, `frequency`) that are right on their row and wrong when averaged.
+
+Every aggregate is computed from the rows below it and checked by a test, so each question has one right answer. The catalog (`catalog/demo-large/data_catalog.yaml`) describes every column. As an SQL prompt it is **16,437 tokens**, counted with the API's token counter for `claude-haiku-4-5`, against 1,886 for the five-table demo.
+
+`eval/demo-large/questions.yaml` holds **twenty questions**, written and committed before the first run. Each has its trap, a reference query and the views a correct answer needs (`a|b` where either will do). The selection is scored against those: **recall** (were all needed views picked?) and **precision** (how many of the picked views were needed?).
+
+### Results
+
+Measured on 2026-10-09 with **`claude-haiku-4-5`** for every step, three runs of all twenty questions per stage. Every run is in `eval/runs/2026-10-09-claude-haiku-4-5-demo-large/`, with the SQL, the views the SQL step saw, and the tokens and time of each model call.
+
+| Stage | correct | correct, two-decimal rounding counts | prompt tokens / question (selection + SQL) | cost / question, cache warm | cost / question, cache cold | seconds / question |
+|---|---|---|---|---|---|---|
+| `schema` | 32/60 | 35/60 | 3,659 | $0.0043 | — | 1.7 |
+| `freetext` | 35/60 | 39/60 | 4,006 | $0.0046 | — | 1.7 |
+| `catalog` | **52/60** | **56/60** | 16,437 | $0.0022 | $0.0210 | 1.7 |
+| `catalog_selected` | **47/60** | **53/60** | 5,444 + 1,321 | $0.0025 | $0.0087 | 2.9 |
+
+Selection: **98 % recall, 96 % precision**, and no fallback to the full catalog in 60 questions.
+
+- **Cost, cache warm** is what was measured. The questions ran back to back, so the full catalog was read from the prompt cache at a tenth of the price almost every time. **Cost, cache cold** is computed from the same token counts for questions that arrive with pauses in between, so the cache has to be written again. That is the usual case in the Brain's real traffic. Prices are the Haiku 4.5 list prices: $1 input, $5 output, $1.25 cache write and $0.10 cache read per million tokens.
+- **Two-decimal rounding:** the SQL prompt asks for two decimals, and the strict scorer accepts a rounded value only from 1 upwards. A correct query for a rate of 0.1153 that returns 0.12 therefore counts as wrong. The second column also accepts that. Both are reported; the strict one is the score of record, as in the results above.
+
+What this shows, and what it does not:
+
+- **Accuracy did not improve here.** With the whole catalog the model was right slightly more often: 52 against 47 (strict), 56 against 53 (with rounding). On twenty questions that is one or two questions; it is not a rate.
+- **The SQL step sees 92 % less catalog** (1,321 instead of 16,437 tokens). What that saves depends on the cache. With a warm cache it saves nothing: the narrowed prompt is too short to be cached, and the selection is one more call. With a cold cache it saves about 60 % per question.
+- **It is slower.** One more model call means 2.9 instead of 1.7 seconds. The Brain's own measurement came to the same conclusion: the selection saves cost, not time.
+
+From the recorded runs, three cases worth looking at:
+
+- **The full catalog picks the wrong table.** *"How many orders did we receive in the week from Monday 10 August to Sunday 16 August 2026?"* With the whole catalog the model was right 0 of 3 times: it used `shop_sales_weekly` with `week_start = '2026-08-12'`, a Wednesday, so no row matched. With the selection it was right 3 of 3 times, from `shop_sales_daily`.
+- **The selection silently misses views it needs.** *"What share of the units ordered in June 2026 was returned, per product category?"* The selection picked `shop_product_sales_daily`, `shop_returns` and `products`, but not `shop_order_items` and `shop_orders`, which the question needs. The result was 0 of 3, with return rates above 100 %. The fallback did not help, because a query came back, just on the wrong tables. This is the new failure the step brings.
+- **The selection removes context that lived in another view.** *"Under first-click attribution, how many purchases did paid social start in July 2026?"* With the selection the model was right 0 of 3 times: it filtered on `'Paid Social'`. The values (`paid_social`, …) are listed in the description of `web_sessions_daily`, which a model with the full catalog sees and the narrowed prompt does not. Once a model only sees a few entries, each entry has to stand on its own. The catalog was not changed after this was found.
+
+Read these numbers with their limits:
+
+- **One small model, one dataset, twenty chosen questions.** The traps are real ones, but they were chosen. This shows the mechanism, not a rate to expect elsewhere. An attempt with a larger model could not run from the environment this was built in and is not reported.
+- **The catalog here is small for the purpose.** At about 16,000 tokens the full catalog is long, but a model can still keep it in view. In the Brain a client's SQL prompt is many times that size, and that is where the selection was introduced. Whether the accuracy picture changes with a catalog that large is not measured here.
+- **The catalog's query patterns** cover some of the calculations the questions need, such as a ratio of sums or a return-rate cohort. They are in the full catalog and, when their tables are selected, in the narrowed one.
+- **Scored on the result table**, not on the prose answer. The answer step was not run in this evaluation.
+
+> Background and discussion: *[link to the post on steimann.de, to be added]*
+
 ## The chart after the answer
 
 The second component of the Brain's Data Chat: a chart drawn from the result, next to the SQL and the answer.
@@ -165,17 +243,23 @@ src/data_chat/
   llm.py                 LlmClient port, Anthropic and OpenAI adapters
   backend.py             SqlBackend port, DuckDB and BigQuery, SqlRejected
   catalog.py             catalog format and its rendering into the prompt
-  context.py             the three stages
+  context.py             the stages: schema, freetext, catalog, catalog_selected
+  selection.py           the selection step: one card per view, structured output
   prompts.py             system prompts
   sql.py                 pure helpers copied from the Brain
-  pipeline.py            question → SQL → result → answer, one retry
+  pipeline.py            question → [selection] → SQL → result → answer, one retry, tokens per call
   chart.py               the answer's chart: spec check and Plotly figure
   page.py                one answer as an HTML page (SQL, answer, chart, table)
   evaluation.py          scoring per stage
-  demo_data.py           GENERATED demo data
-  cli.py                 data-chat demo-data | prompt | ask [--chart] | eval [--charts]
+  demo_data.py           GENERATED demo data (5 tables)
+  demo_large.py          GENERATED demo data, large (35 tables)
+  datasets.py            which database, catalog, notes and questions belong together
+  cli.py                 data-chat [--dataset] demo-data | prompt | ask [--chart] | eval [--charts]
 catalog/                 data_catalog.yaml (field level), freetext.md (table level)
+catalog/demo-large/      the same for the large dataset
 eval/questions.yaml      questions, traps, reference queries
+eval/demo-large/         twenty questions, each with the views it needs
+eval/runs/               every published run, per question
 tests/                   offline tests
 ```
 

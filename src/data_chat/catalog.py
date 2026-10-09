@@ -20,9 +20,17 @@ revenue reported as net, an average of daily rates instead of a rate).
 ``_format_examples_filtered`` / ``_format_warnings`` in
 ``src/adp/services/data_chat_schema.py`` at b054abe, 2026-09-28), without its
 per-client filtering, KPI registry and coverage probe.
+
+``views=`` narrows the rendering to a selection, as the Brain does for its
+view router (#1052, 2026-10-06): only the selected views are described, and
+the join table and the query patterns follow — a join or a pattern appears
+only when every table it names is selected. The general notes stay, because
+they are rules about the data, not about one table.
 """
 
 from __future__ import annotations
+
+import re
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -120,30 +128,50 @@ def _format_view(view: CatalogView) -> str:
     return "\n".join(parts)
 
 
-def render_catalog(catalog: Catalog, *, qualify=lambda t: t) -> str:
-    """The catalog as the markdown block that goes into the SQL prompt."""
+def tables_in(sql: str, names) -> set[str]:
+    """The catalog tables ``sql`` names, as whole words — bare, in a
+    ``{placeholder}`` or qualified (`project.dataset.table`)."""
+    return {n for n in names if re.search(rf"(?<!\w){re.escape(n)}(?!\w)", sql)}
+
+
+def render_views(catalog: Catalog, names) -> str:
+    """Just the entries of ``names``, in catalog order — what the interpretation
+    step of the selected stage reads about the views its query used."""
+    return "\n\n".join(_format_view(catalog.views[n]) for n in sorted(catalog.views) if n in set(names))
+
+
+def render_catalog(catalog: Catalog, *, qualify=lambda t: t, views=None) -> str:
+    """The catalog as the markdown block that goes into the SQL prompt.
+
+    ``views`` limits it to those views (and the joins and patterns among
+    them); None renders everything.
+    """
+    keep = set(catalog.views) if views is None else set(views) & set(catalog.views)
+    relationships = [r for r in catalog.join_relationships if {r["view_a"], r["view_b"]} <= keep]
+    examples = [e for e in catalog.query_examples if tables_in(e["sql"], catalog.views) <= keep]
+
     parts = ["## Available Tables", ""]
-    for name in sorted(catalog.views):
+    for name in sorted(keep):
         parts.append(_format_view(catalog.views[name]))
         parts.append("")
 
-    if catalog.join_relationships:
+    if relationships:
         parts += [
             "## Table Relationships (for JOINs)",
             "",
             "| Table A | Table B | JOIN keys |",
             "|---------|---------|-----------|",
         ]
-        for rel in catalog.join_relationships:
+        for rel in relationships:
             keys = ", ".join(f"`{k}`" for k in rel["keys"])
             parts.append(f"| {rel['view_a']} | {rel['view_b']} | {keys} |")
         for note in catalog.join_notes:
             parts.append(f"- {note}")
         parts.append("")
 
-    if catalog.query_examples:
+    if examples:
         parts.append("## Query Patterns")
-        for ex in catalog.query_examples:
+        for ex in examples:
             sql = ex["sql"].strip()
             for table in catalog.views:
                 sql = sql.replace(f"{{{table}}}", qualify(table))

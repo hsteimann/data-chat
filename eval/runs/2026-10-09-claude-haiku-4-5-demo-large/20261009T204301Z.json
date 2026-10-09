@@ -1,0 +1,1266 @@
+{
+  "meta": {
+    "model": "claude-haiku-4-5",
+    "select_model": "claude-haiku-4-5",
+    "dataset": "demo-large",
+    "stages": [
+      "schema",
+      "freetext"
+    ],
+    "questions": "eval/demo-large/questions.yaml",
+    "charts": false,
+    "run_at": "20261009T204301Z"
+  },
+  "outcomes": [
+    {
+      "stage": "schema",
+      "question_id": "net_revenue_august",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(revenue_net), 2) AS net_revenue_august_2026\nFROM shop_sales_monthly\nWHERE month = '2026-08-01'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3468,
+            "output_tokens": 59,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.6640605009888532
+        }
+      ],
+      "seconds": 1.667,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "revenue_after_returns_august",
+      "correct": true,
+      "sql": "SELECT\n  SUM(revenue_net_after_returns) AS net_revenue_after_returns\nFROM shop_sales_net_of_returns_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3470,
+            "output_tokens": 67,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 0.9556105009978637
+        }
+      ],
+      "seconds": 0.958,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "orders_week_aug_10",
+      "correct": true,
+      "sql": "SELECT \n  orders\nFROM shop_sales_weekly\nWHERE week_start = '2026-08-10'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3482,
+            "output_tokens": 36,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.4350949590007076
+        }
+      ],
+      "seconds": 1.439,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "avg_order_value_july",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(AVG(avg_order_value_net), 2) AS average_net_order_value\nFROM shop_sales_daily\nWHERE date BETWEEN '2026-07-01' AND '2026-07-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3470,
+            "output_tokens": 72,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.5461758339952212
+        }
+      ],
+      "seconds": 1.551,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "new_customer_orders_september",
+      "correct": true,
+      "sql": "SELECT \n  SUM(new_customer_orders) AS new_customer_orders_september\nFROM shop_sales_daily\nWHERE date BETWEEN '2026-09-01' AND '2026-09-30'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3470,
+            "output_tokens": 65,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.0393375000130618
+        }
+      ],
+      "seconds": 1.041,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "total_ad_spend_august",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(cost_eur), 2) AS total_ad_spend_eur\nFROM ads_all_channels_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3472,
+            "output_tokens": 72,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.73470370900759
+        }
+      ],
+      "seconds": 1.741,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "google_search_spend_july",
+      "correct": true,
+      "sql": "SELECT \n  ROUND(SUM(cost_micros) / 1000000.0, 2) AS total_spend_eur\nFROM ads_google_search_campaign_daily\nWHERE date BETWEEN '2026-07-01' AND '2026-07-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3475,
+            "output_tokens": 81,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.2313911250093952
+        }
+      ],
+      "seconds": 1.236,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "meta_roas_by_campaign_august",
+      "correct": false,
+      "sql": "SELECT\n  campaign_id,\n  campaign_name,\n  ROUND(SUM(purchase_value_1d_click) / NULLIF(SUM(spend), 0), 2) AS roas\nFROM ads_meta_campaign_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY campaign_id, campaign_name\nORDER BY campaign_id\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": true,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3473,
+            "output_tokens": 93,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.8716712509922218
+        },
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3676,
+            "output_tokens": 106,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 2.0384718340064865
+        }
+      ],
+      "seconds": 3.917,
+      "correct_rounded": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "amazon_acos_august",
+      "correct": false,
+      "sql": "SELECT \n  ROUND(AVG(acos_14d), 2) AS avg_acos_14d\nFROM ads_amazon_sp_campaign_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3476,
+            "output_tokens": 75,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.389971541997511
+        }
+      ],
+      "seconds": 1.394,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "cpc_by_channel_september",
+      "correct": false,
+      "sql": "SELECT \n    channel,\n    ROUND(AVG(cpc), 2) AS avg_cpc\nFROM ads_all_channels_daily\nWHERE date BETWEEN '2026-09-01' AND '2026-09-30'\nGROUP BY channel\nORDER BY avg_cpc DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3474,
+            "output_tokens": 83,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.218907834001584
+        }
+      ],
+      "seconds": 1.223,
+      "correct_rounded": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "budget_utilisation_august",
+      "correct": false,
+      "sql": "SELECT\n  b.channel,\n  b.planned_budget_eur,\n  ROUND(COALESCE(SUM(a.cost_eur), 0), 2) AS actual_spend_eur,\n  ROUND(\n    COALESCE(SUM(a.cost_eur), 0) / NULLIF(b.planned_budget_eur, 0) * 100,\n    2\n  ) AS budget_spend_share_percent\nFROM marketing_budget_monthly b\nLEFT JOIN ads_all_channels_daily a\n  ON b.channel = a.channel\n  AND a.date >= '2026-08-01'\n  AND a.date < '2026-09-01'\nWHERE b.month = '2026-08-01'\nGROUP BY b.channel, b.planned_budget_eur\nORDER BY b.channel\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3478,
+            "output_tokens": 221,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 2.241546750999987
+        }
+      ],
+      "seconds": 2.249,
+      "correct_rounded": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "purchases_by_channel_august",
+      "correct": true,
+      "sql": "SELECT\n  channel_group,\n  SUM(purchases) AS total_purchases\nFROM web_conversions_last_click_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY channel_group\nORDER BY total_purchases DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3474,
+            "output_tokens": 80,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.1080455430055736
+        }
+      ],
+      "seconds": 1.113,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "first_click_paid_social_july",
+      "correct": false,
+      "sql": "SELECT\n  SUM(purchases) AS total_purchases\nFROM web_conversions_first_click_daily\nWHERE date BETWEEN '2026-07-01' AND '2026-07-31'\n  AND channel_group = 'Paid Social'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3476,
+            "output_tokens": 74,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.2545095419918653
+        }
+      ],
+      "seconds": 1.258,
+      "correct_rounded": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "conversion_rate_by_channel_august",
+      "correct": true,
+      "sql": "SELECT\n  ws.channel_group,\n  ROUND(\n    SUM(COALESCE(wc.purchases, 0)) / NULLIF(SUM(ws.sessions), 0),\n    4\n  ) AS conversion_rate,\n  SUM(ws.sessions) AS total_sessions,\n  SUM(COALESCE(wc.purchases, 0)) AS total_purchases\nFROM web_sessions_daily ws\nLEFT JOIN web_conversions_last_click_daily wc\n  ON ws.date = wc.date\n  AND ws.channel_group = wc.channel_group\nWHERE ws.date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY ws.channel_group\nORDER BY conversion_rate DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3477,
+            "output_tokens": 197,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.8325922509975499
+        }
+      ],
+      "seconds": 1.838,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "daily_sessions_august",
+      "correct": true,
+      "sql": "SELECT ROUND(AVG(total_sessions), 2) AS avg_daily_sessions\nFROM (\n  SELECT DATE_TRUNC('day', date)::DATE AS day, SUM(sessions) AS total_sessions\n  FROM web_sessions_daily\n  WHERE date >= '2026-08-01' AND date < '2026-09-01'\n  GROUP BY DATE_TRUNC('day', date)::DATE\n) daily_totals\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3474,
+            "output_tokens": 119,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 2.0058197929902235
+        }
+      ],
+      "seconds": 2.01,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "mobile_cart_abandonment_august",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(\n    100.0 * (\n      (SUM(add_to_carts) - SUM(purchases)) / NULLIF(SUM(add_to_carts), 0)\n    ),\n    2\n  ) AS cart_abandonment_rate_percent\nFROM web_funnel_daily\nWHERE device = 'mobile'\n  AND date >= '2026-08-01'\n  AND date < '2026-09-01'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3472,
+            "output_tokens": 126,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 2.1848138339992147
+        }
+      ],
+      "seconds": 2.189,
+      "correct_rounded": true
+    },
+    {
+      "stage": "schema",
+      "question_id": "return_rate_by_category_june",
+      "correct": false,
+      "sql": "WITH june_orders AS (\n  SELECT \n    p.category,\n    SUM(soi.units) AS units_ordered\n  FROM shop_order_items soi\n  JOIN shop_orders so ON soi.order_id = so.order_id\n  JOIN products p ON soi.sku = p.sku\n  WHERE so.order_date BETWEEN '2026-06-01' AND '2026-06-30'\n  GROUP BY p.category\n),\njune_returns AS (\n  SELECT \n    p.category,\n    SUM(sr.units_returned) AS units_returned\n  FROM shop_returns sr\n  JOIN products p ON sr.sku = p.sku\n  WHERE sr.return_date BETWEEN '2026-06-01' AND '2026-06-30'\n  GROUP BY p.category\n)\nSELECT \n  jo.category,\n  jo.units_ordered,\n  COALESCE(jr.units_returned, 0) AS units_returned,\n  ROUND(100.0 * COALESCE(jr.units_returned, 0) / NULLIF(jo.units_ordered, 0), 2) AS return_share_percent\nFROM june_orders jo\nLEFT JOIN june_returns jr ON jo.category = jr.category\nORDER BY return_share_percent DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3476,
+            "output_tokens": 331,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 2.4885611679928843
+        }
+      ],
+      "seconds": 2.5,
+      "correct_rounded": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "top_products_august",
+      "correct": false,
+      "sql": "SELECT \n  p.sku,\n  p.product_name,\n  ROUND(SUM(soi.item_revenue_gross), 2) as total_revenue_gross,\n  ROUND(SUM(so.revenue_net), 2) as total_revenue_net\nFROM shop_order_items soi\nJOIN shop_orders so ON soi.order_id = so.order_id\nJOIN products p ON soi.sku = p.sku\nWHERE so.order_date >= '2026-08-01' \n  AND so.order_date < '2026-09-01'\nGROUP BY p.sku, p.product_name\nORDER BY total_revenue_net DESC\nLIMIT 5;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3477,
+            "output_tokens": 180,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.8542575839965139
+        }
+      ],
+      "seconds": 1.865,
+      "correct_rounded": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "marketplace_revenue_august",
+      "correct": false,
+      "sql": "SELECT\n  ROUND(SUM(revenue_gross), 2) AS total_gross_revenue\nFROM marketplace_sales_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\n  AND marketplace IN ('Amazon', 'Otto')\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3480,
+            "output_tokens": 78,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.1973332509951433
+        }
+      ],
+      "seconds": 1.204,
+      "correct_rounded": false
+    },
+    {
+      "stage": "schema",
+      "question_id": "gross_margin_by_brand_july",
+      "correct": false,
+      "sql": "SELECT \n    p.brand,\n    ROUND(SUM(soi.item_revenue_gross) - SUM(soi.units * p.cost_price_net), 2) AS gross_margin\nFROM shop_order_items soi\nJOIN products p ON soi.sku = p.sku\nWHERE soi.order_date BETWEEN '2026-07-01' AND '2026-07-31'\nGROUP BY p.brand\nORDER BY gross_margin DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3481,
+            "output_tokens": 128,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.6035448340117
+        }
+      ],
+      "seconds": 1.615,
+      "correct_rounded": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "net_revenue_august",
+      "correct": true,
+      "sql": "SELECT\n  SUM(revenue_net) AS net_revenue_august_2026\nFROM shop_sales_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 3999,
+            "output_tokens": 63,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 0.9917222500080243
+        }
+      ],
+      "seconds": 0.993,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "revenue_after_returns_august",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(revenue_net_after_returns), 2) AS net_revenue_after_returns_august_2026\nFROM shop_sales_net_of_returns_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4001,
+            "output_tokens": 83,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.1224462919926737
+        }
+      ],
+      "seconds": 1.126,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "orders_week_aug_10",
+      "correct": true,
+      "sql": "SELECT\n  SUM(orders) as total_orders\nFROM shop_sales_weekly\nWHERE week_start = '2026-08-10'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4013,
+            "output_tokens": 48,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 0.978948917996604
+        }
+      ],
+      "seconds": 0.982,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "avg_order_value_july",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(AVG(avg_order_value_net), 2) AS average_net_order_value\nFROM shop_sales_daily\nWHERE date BETWEEN '2026-07-01' AND '2026-07-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4001,
+            "output_tokens": 72,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.085711584004457
+        }
+      ],
+      "seconds": 1.088,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "new_customer_orders_september",
+      "correct": true,
+      "sql": "SELECT \n  SUM(new_customer_orders) as new_customer_orders\nFROM shop_sales_daily\nWHERE date BETWEEN '2026-09-01' AND '2026-09-30'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4001,
+            "output_tokens": 63,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.1394423339952482
+        }
+      ],
+      "seconds": 1.142,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "total_ad_spend_august",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(SUM(cost_eur), 2) AS total_ad_spend_eur\nFROM ads_all_channels_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4003,
+            "output_tokens": 72,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.0651442090020282
+        }
+      ],
+      "seconds": 1.069,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "google_search_spend_july",
+      "correct": true,
+      "sql": "SELECT \n  ROUND(SUM(cost_micros) / 1000000.0, 2) AS total_spend_eur\nFROM ads_google_search_campaign_daily\nWHERE date BETWEEN '2026-07-01' AND '2026-07-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4006,
+            "output_tokens": 81,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.1404438340105116
+        }
+      ],
+      "seconds": 1.145,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "meta_roas_by_campaign_august",
+      "correct": true,
+      "sql": "SELECT\n  campaign_name,\n  ROUND(SUM(website_purchase_roas * spend) / NULLIF(SUM(spend), 0), 2) AS weighted_roas\nFROM ads_meta_campaign_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY campaign_name\nORDER BY weighted_roas DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4004,
+            "output_tokens": 105,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.4137599590030732
+        }
+      ],
+      "seconds": 1.417,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "amazon_acos_august",
+      "correct": false,
+      "sql": "SELECT\n  ROUND(AVG(acos_14d), 2) AS avg_acos_14d\nFROM ads_amazon_sp_campaign_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4007,
+            "output_tokens": 74,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.3407132089923834
+        }
+      ],
+      "seconds": 1.343,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "cpc_by_channel_september",
+      "correct": false,
+      "sql": "SELECT \n  channel,\n  ROUND(AVG(cpc), 2) AS avg_cpc\nFROM ads_all_channels_daily\nWHERE date BETWEEN '2026-09-01' AND '2026-09-30'\nGROUP BY channel\nORDER BY channel\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4005,
+            "output_tokens": 79,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.2289620420051506
+        }
+      ],
+      "seconds": 1.234,
+      "correct_rounded": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "budget_utilisation_august",
+      "correct": false,
+      "sql": "WITH august_budget AS (\n  SELECT channel, planned_budget_eur\n  FROM marketing_budget_monthly\n  WHERE month = '2026-08-01'\n),\naugust_spend AS (\n  SELECT channel, ROUND(SUM(cost_eur), 2) as actual_spend\n  FROM ads_all_channels_daily\n  WHERE date BETWEEN '2026-08-01' AND '2026-08-31'\n  GROUP BY channel\n)\nSELECT \n  b.channel,\n  b.planned_budget_eur,\n  COALESCE(s.actual_spend, 0) as actual_spend,\n  ROUND(COALESCE(s.actual_spend, 0) / NULLIF(b.planned_budget_eur, 0) * 100, 2) as budget_spend_share_percent\nFROM august_budget b\nLEFT JOIN august_spend s ON b.channel = s.channel\nORDER BY b.channel\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4009,
+            "output_tokens": 238,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 2.0763729590107687
+        }
+      ],
+      "seconds": 2.084,
+      "correct_rounded": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "purchases_by_channel_august",
+      "correct": true,
+      "sql": "SELECT \n  channel_group,\n  SUM(purchases) AS purchases\nFROM web_conversions_last_click_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY channel_group\nORDER BY purchases DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4005,
+            "output_tokens": 77,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.1182439580006758
+        }
+      ],
+      "seconds": 1.123,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "first_click_paid_social_july",
+      "correct": false,
+      "sql": "SELECT\n  SUM(purchases) as total_purchases\nFROM web_conversions_first_click_daily\nWHERE date >= '2026-07-01'\n  AND date < '2026-08-01'\n  AND channel_group = 'Paid Social'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4007,
+            "output_tokens": 77,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.664759209001204
+        }
+      ],
+      "seconds": 1.667,
+      "correct_rounded": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "conversion_rate_by_channel_august",
+      "correct": true,
+      "sql": "SELECT\n  wsd.channel_group,\n  ROUND(\n    SUM(wcd.purchases) / NULLIF(SUM(wsd.sessions), 0),\n    4\n  ) AS conversion_rate\nFROM web_sessions_daily wsd\nLEFT JOIN web_conversions_last_click_daily wcd\n  ON wsd.date = wcd.date\n  AND wsd.channel_group = wcd.channel_group\nWHERE wsd.date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY wsd.channel_group\nORDER BY conversion_rate DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4008,
+            "output_tokens": 159,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.615477416999056
+        }
+      ],
+      "seconds": 1.624,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "daily_sessions_august",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(AVG(total_sessions), 2) as avg_daily_sessions\nFROM (\n  SELECT\n    date,\n    SUM(sessions) as total_sessions\n  FROM web_sessions_daily\n  WHERE date BETWEEN '2026-08-01' AND '2026-08-31'\n  GROUP BY date\n) subquery\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4005,
+            "output_tokens": 98,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.1917480010015424
+        }
+      ],
+      "seconds": 1.196,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "mobile_cart_abandonment_august",
+      "correct": true,
+      "sql": "SELECT\n  ROUND(\n    100.0 * (1 - SUM(purchases) / NULLIF(SUM(add_to_carts), 0)),\n    2\n  ) AS cart_abandonment_rate_mobile_august_2026\nFROM web_funnel_daily\nWHERE device = 'mobile'\n  AND DATE_TRUNC('month', date) = '2026-08-01'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4003,
+            "output_tokens": 113,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 2.0853232099907473
+        }
+      ],
+      "seconds": 2.089,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "return_rate_by_category_june",
+      "correct": false,
+      "sql": "WITH june_orders AS (\n  SELECT \n    p.category,\n    SUM(soi.units) AS units_ordered\n  FROM shop_order_items soi\n  JOIN shop_orders so ON soi.order_id = so.order_id\n  JOIN products p ON soi.sku = p.sku\n  WHERE so.order_date BETWEEN '2026-06-01' AND '2026-06-30'\n  GROUP BY p.category\n),\njune_returns AS (\n  SELECT \n    p.category,\n    SUM(sr.units_returned) AS units_returned\n  FROM shop_returns sr\n  JOIN shop_order_items soi ON sr.order_id = soi.order_id AND sr.sku = soi.sku\n  JOIN shop_orders so ON sr.order_id = so.order_id\n  JOIN products p ON sr.sku = p.sku\n  WHERE so.order_date BETWEEN '2026-06-01' AND '2026-06-30'\n  GROUP BY p.category\n)\nSELECT \n  jo.category,\n  jo.units_ordered,\n  COALESCE(jr.units_returned, 0) AS units_returned,\n  ROUND(100.0 * COALESCE(jr.units_returned, 0) / NULLIF(jo.units_ordered, 0), 2) AS return_share_percent\nFROM june_orders jo\nLEFT JOIN june_returns jr ON jo.category = jr.category\nORDER BY return_share_percent DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4007,
+            "output_tokens": 379,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 3.883336168000824
+        }
+      ],
+      "seconds": 3.896,
+      "correct_rounded": false
+    },
+    {
+      "stage": "freetext",
+      "question_id": "top_products_august",
+      "correct": true,
+      "sql": "SELECT \n    p.sku,\n    p.product_name,\n    ROUND(SUM(sps.revenue_net), 2) AS total_revenue_net\nFROM shop_product_sales_daily sps\nJOIN products p ON sps.sku = p.sku\nWHERE sps.date BETWEEN '2026-08-01' AND '2026-08-31'\nGROUP BY p.sku, p.product_name\nORDER BY total_revenue_net DESC\nLIMIT 5;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4008,
+            "output_tokens": 128,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.9957297509972705
+        }
+      ],
+      "seconds": 2.003,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "marketplace_revenue_august",
+      "correct": true,
+      "sql": "SELECT \n  ROUND(SUM(revenue_gross), 2) AS total_gross_revenue\nFROM marketplace_sales_daily\nWHERE date BETWEEN '2026-08-01' AND '2026-08-31'\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4011,
+            "output_tokens": 67,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.0467717919964343
+        }
+      ],
+      "seconds": 1.05,
+      "correct_rounded": true
+    },
+    {
+      "stage": "freetext",
+      "question_id": "gross_margin_by_brand_july",
+      "correct": false,
+      "sql": "SELECT \n  p.brand,\n  ROUND(SUM(soi.item_revenue_gross) - SUM(soi.units * p.cost_price_net), 2) AS gross_margin\nFROM shop_order_items soi\nJOIN shop_orders so ON soi.order_id = so.order_id\nJOIN products p ON soi.sku = p.sku\nWHERE so.order_date BETWEEN '2026-07-01' AND '2026-07-31'\nGROUP BY p.brand\nORDER BY gross_margin DESC\nLIMIT 1000;",
+      "failure": null,
+      "error": null,
+      "retried": false,
+      "chart": null,
+      "chart_ok": null,
+      "chart_spec": null,
+      "selected_views": null,
+      "selection_skipped": null,
+      "fallback": null,
+      "recall": null,
+      "precision": null,
+      "steps": [
+        {
+          "phase": "sql",
+          "usage": {
+            "input_tokens": 4012,
+            "output_tokens": 146,
+            "cache_write_tokens": 0,
+            "cache_read_tokens": 0
+          },
+          "seconds": 1.6691198750049807
+        }
+      ],
+      "seconds": 1.683,
+      "correct_rounded": false
+    }
+  ]
+}
