@@ -1,0 +1,998 @@
+# Data catalog for the GENERATED large demo data (src/data_chat/demo_large.py).
+# Same format as catalog/data_catalog.yaml and the Nakoa Brain's
+# config/data_catalog.yaml: `description` is the label, `definition` the
+# instruction for use — written wherever misuse would produce a plausible
+# wrong number. `description`, `grain`, `use_for` and `typical_questions` are
+# also what the view-selection step reads (one short card per view); the
+# column definitions are only for the SQL step.
+#
+# Data period: 2026-06-01 (Monday) to 2026-09-27 (Sunday). All money in EUR.
+
+views:
+
+  # ── Dimensions ──────────────────────────────────────────────────────────
+
+  products:
+    description: The shop's product catalogue.
+    grain: One row per SKU.
+    use_for: Product names, categories, subcategories, brands and list prices — to label or group anything that carries a sku.
+    typical_questions:
+      - Which products are in the Running category?
+      - What does the Alpine Hiking Boot cost?
+    columns:
+      - name: sku
+        type: VARCHAR
+        description: Stock-keeping unit, the product key.
+        definition: Join key for every table with a sku column (order items, product sales, inventory, marketplaces, Google Shopping).
+      - name: product_name
+        type: VARCHAR
+        description: Product name.
+      - name: category
+        type: VARCHAR
+        description: Product category (Running, Hiking, Outerwear, Camping, Accessories).
+      - name: subcategory
+        type: VARCHAR
+        description: Product subcategory within the category, e.g. Shoes, Packs, Jackets.
+      - name: brand
+        type: VARCHAR
+        description: Brand of the product.
+      - name: list_price_gross
+        type: DOUBLE
+        description: List price per unit in EUR, including 19 % VAT.
+        definition: The catalogue price, not what customers paid — July orders were discounted. For revenue use the sales tables.
+
+  campaigns:
+    description: All advertising campaigns across every ad channel.
+    grain: One row per campaign.
+    use_for: Campaign names, the channel a campaign runs on, its status, objective and start date — to label campaign-level ad data.
+    typical_questions:
+      - Which campaigns are paused?
+      - Which campaigns run on Meta?
+    columns:
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign identifier, unique across channels.
+        definition: Join to the campaign_id of the per-channel ad tables (ads_google_search_campaign_daily, ads_google_shopping_product_daily, ads_meta_campaign_daily, ads_microsoft_campaign_daily, ads_amazon_sp_campaign_daily).
+      - name: campaign_name
+        type: VARCHAR
+        description: Campaign name.
+      - name: channel
+        type: VARCHAR
+        description: Ad channel — google_search, google_shopping, meta, microsoft or amazon_sp.
+      - name: status
+        type: VARCHAR
+        description: Current status, active or paused.
+        definition: Today's status. A paused campaign still has rows for the days it ran before it was paused.
+      - name: objective
+        type: VARCHAR
+        description: Campaign objective, conversions or traffic.
+      - name: start_date
+        type: DATE
+        description: Day the campaign was first started (may be before the data period).
+
+  customers:
+    description: Shop customers, one row per customer.
+    grain: One row per customer_id.
+    use_for: Customer country, newsletter opt-in and the date of a customer's first order.
+    typical_questions:
+      - How many customers come from Austria?
+      - How many customers opted into the newsletter?
+    important: Only customers who ordered within the data period are listed; first_order_date is their first order in this data, not necessarily ever.
+    columns:
+      - name: customer_id
+        type: INTEGER
+        description: Customer identifier.
+        definition: Join to shop_orders.customer_id.
+      - name: first_order_date
+        type: DATE
+        description: Date of the customer's first order in the data.
+      - name: country
+        type: VARCHAR
+        description: Shipping country (DE, AT, CH).
+      - name: newsletter_optin
+        type: BOOLEAN
+        description: Whether the customer subscribed to the newsletter.
+
+  # ── Own web shop ────────────────────────────────────────────────────────
+
+  shop_orders:
+    description: Every order placed in the own web shop, including cancelled ones.
+    grain: One row per order.
+    use_for: Order-level analysis — order values, cancellations, new vs returning customers, shipping fees, discounts.
+    typical_questions:
+      - How many orders were cancelled in August?
+      - What was the average order value of new customers?
+    important: Includes cancelled orders (order_status = 'cancelled'). Revenue figures exclude shipping. For daily, weekly or monthly totals prefer shop_sales_daily / _weekly / _monthly, which already exclude cancelled orders.
+    columns:
+      - name: order_id
+        type: INTEGER
+        description: Order identifier.
+        definition: Join to shop_order_items.order_id and shop_returns.order_id.
+      - name: order_date
+        type: DATE
+        description: Day the order was placed.
+      - name: customer_id
+        type: INTEGER
+        description: Customer who placed the order.
+      - name: is_new_customer
+        type: BOOLEAN
+        description: True when this is the customer's first order.
+      - name: order_status
+        type: VARCHAR
+        description: completed or cancelled.
+        definition: Filter order_status = 'completed' for revenue and order counts; cancelled orders were never paid.
+      - name: revenue_gross
+        type: DOUBLE
+        description: Merchandise value paid in EUR, including 19 % VAT, excluding shipping.
+        definition: Gross revenue. Net revenue = revenue_net (already computed). Never add shipping_fee_gross to it for revenue.
+      - name: revenue_net
+        type: DOUBLE
+        description: Merchandise value in EUR excluding VAT (revenue_gross / 1.19), excluding shipping.
+      - name: shipping_fee_gross
+        type: DOUBLE
+        description: Shipping fee charged in EUR including VAT (4.95 below 75 EUR order value, else 0).
+      - name: discount_gross
+        type: DOUBLE
+        description: Discount granted against list prices in EUR including VAT.
+
+  shop_order_items:
+    description: The products in each web-shop order, including items of cancelled orders.
+    grain: One row per order and product line.
+    use_for: Which products were bought together, units per order, revenue per product at order level.
+    typical_questions:
+      - What is the average number of units per order?
+      - Which products are most often bought together?
+    important: Contains items of cancelled orders too — join shop_orders and filter order_status = 'completed'. For revenue per product per day prefer shop_product_sales_daily.
+    columns:
+      - name: order_id
+        type: INTEGER
+        description: Order the line belongs to.
+      - name: order_date
+        type: DATE
+        description: Day the order was placed.
+      - name: sku
+        type: VARCHAR
+        description: Product of the line.
+      - name: units
+        type: INTEGER
+        description: Units of the product in the order.
+      - name: item_revenue_gross
+        type: DOUBLE
+        description: Amount paid for the line in EUR including VAT.
+
+  shop_returns:
+    description: Returned items of web-shop orders, booked on the day the return arrived.
+    grain: One row per return of one product from one order.
+    use_for: Return counts, returned units, refunds, return rates by product or category.
+    typical_questions:
+      - How many units were returned in August?
+      - Which category has the highest return rate?
+    important: Dated by return_date, not by order date. A return rate by order cohort must join to the orders' order_date; returns that had not arrived by 2026-09-27 are not in the data yet.
+    columns:
+      - name: return_id
+        type: INTEGER
+        description: Return identifier.
+      - name: order_id
+        type: INTEGER
+        description: Order the returned items came from.
+      - name: return_date
+        type: DATE
+        description: Day the return arrived.
+      - name: sku
+        type: VARCHAR
+        description: Returned product.
+      - name: units_returned
+        type: INTEGER
+        description: Units returned.
+        definition: Return rate per category = SUM(units_returned) / SUM(units ordered) of the same orders — from shop_order_items of completed orders, not from shop_sales_daily.
+      - name: refund_gross
+        type: DOUBLE
+        description: Amount refunded in EUR including VAT.
+
+  shop_sales_daily:
+    description: Web-shop sales per day — completed orders only, before returns.
+    grain: One row per day.
+    use_for: Shop revenue (gross and net), orders, units and new-customer orders per day, or summed over any date range.
+    typical_questions:
+      - What was our shop revenue in August?
+      - How many orders did we get last week?
+      - What was the net revenue per day in July?
+    important: The current definition of shop sales. Excludes cancelled orders and shipping; returns are NOT deducted (see shop_sales_net_of_returns_daily). The weekly and monthly tables hold the same numbers summed.
+    columns:
+      - name: date
+        type: DATE
+        description: Order day.
+      - name: orders
+        type: INTEGER
+        description: Completed orders placed that day.
+      - name: new_customer_orders
+        type: INTEGER
+        description: Completed orders by first-time customers.
+      - name: units
+        type: INTEGER
+        description: Units in completed orders.
+      - name: revenue_gross
+        type: DOUBLE
+        description: Revenue in EUR including 19 % VAT, excluding shipping.
+        definition: Gross. "Revenue" in a question means net unless it says gross — use revenue_net. Average order value = SUM(revenue_net) / SUM(orders), a ratio of sums.
+      - name: revenue_net
+        type: DOUBLE
+        description: Revenue in EUR excluding VAT and shipping, before returns.
+      - name: shipping_fee_gross
+        type: DOUBLE
+        description: Shipping fees charged in EUR including VAT.
+
+  shop_sales_weekly:
+    description: Web-shop sales per calendar week — the same figures as shop_sales_daily, summed per week.
+    grain: One row per week, starting Monday.
+    use_for: Week-over-week shop revenue and orders.
+    typical_questions:
+      - How did shop revenue develop week by week?
+      - Which week had the most orders?
+    important: Weeks run Monday to Sunday and are keyed by week_start. A date range that does not start on a Monday and end on a Sunday cannot be answered from this table — use shop_sales_daily.
+    columns:
+      - name: week_start
+        type: DATE
+        description: Monday of the week.
+      - name: orders
+        type: INTEGER
+        description: Completed orders in the week.
+      - name: new_customer_orders
+        type: INTEGER
+        description: Completed orders by first-time customers in the week.
+      - name: units
+        type: INTEGER
+        description: Units in completed orders.
+      - name: revenue_gross
+        type: DOUBLE
+        description: Revenue in EUR including VAT, excluding shipping.
+      - name: revenue_net
+        type: DOUBLE
+        description: Revenue in EUR excluding VAT and shipping, before returns.
+      - name: shipping_fee_gross
+        type: DOUBLE
+        description: Shipping fees charged in EUR including VAT.
+
+  shop_sales_monthly:
+    description: Web-shop sales per calendar month — the same figures as shop_sales_daily, summed per month.
+    grain: One row per month.
+    use_for: Month-over-month shop revenue and orders.
+    typical_questions:
+      - What was the shop revenue per month?
+      - Did orders grow from June to August?
+    important: September 2026 is a partial month (data ends 2026-09-27); compare it with full months only per day.
+    columns:
+      - name: month
+        type: DATE
+        description: First day of the month.
+      - name: orders
+        type: INTEGER
+        description: Completed orders in the month.
+      - name: new_customer_orders
+        type: INTEGER
+        description: Completed orders by first-time customers in the month.
+      - name: units
+        type: INTEGER
+        description: Units in completed orders.
+      - name: revenue_gross
+        type: DOUBLE
+        description: Revenue in EUR including VAT, excluding shipping.
+      - name: revenue_net
+        type: DOUBLE
+        description: Revenue in EUR excluding VAT and shipping, before returns.
+      - name: shipping_fee_gross
+        type: DOUBLE
+        description: Shipping fees charged in EUR including VAT.
+
+  shop_sales_net_of_returns_daily:
+    description: Web-shop net revenue per day after deducting the refunds booked that day.
+    grain: One row per day.
+    use_for: Revenue after returns, refunds per day.
+    typical_questions:
+      - What was our revenue after returns in August?
+      - How much did we refund last month?
+    important: Refunds are deducted on the day the return arrived, not on the day of the original order — so a day's revenue_net_after_returns mixes that day's orders with earlier orders' returns. Only use it when a question asks about returns or refunds.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: revenue_net
+        type: DOUBLE
+        description: Net revenue of the day's completed orders in EUR, before returns (same as shop_sales_daily.revenue_net).
+      - name: refunds_net
+        type: DOUBLE
+        description: Refunds for returns that arrived that day, in EUR excluding VAT.
+      - name: revenue_net_after_returns
+        type: DOUBLE
+        description: revenue_net minus refunds_net, in EUR.
+
+  shop_sales_daily_v1:
+    description: DEPRECATED — old daily shop sales. Use shop_sales_daily instead.
+    grain: One row per day.
+    use_for: Nothing new. Kept only so that old reports still run.
+    typical_questions:
+      - (none — superseded by shop_sales_daily)
+    important: DEPRECATED. Its revenue includes cancelled orders AND shipping fees and is gross, and its order count includes cancelled orders, so it overstates both. Never use it to answer a question.
+    columns:
+      - name: date
+        type: DATE
+        description: Order day.
+      - name: orders
+        type: INTEGER
+        description: All orders placed that day, including cancelled ones.
+      - name: revenue
+        type: DOUBLE
+        description: Gross revenue plus shipping fees of all orders, including cancelled ones, in EUR.
+
+  shop_product_sales_daily:
+    description: Web-shop sales per day and product — completed orders only, before returns.
+    grain: One row per day and sku with sales.
+    use_for: Revenue and units per product, category or brand, per day or over a date range.
+    typical_questions:
+      - What were the top 5 products by revenue in August?
+      - How many units of Running products did we sell in July?
+    important: Category and brand only via products, joined on sku. A product with no sales on a day has no row.
+    columns:
+      - name: date
+        type: DATE
+        description: Order day.
+      - name: sku
+        type: VARCHAR
+        description: Product.
+      - name: units_ordered
+        type: INTEGER
+        description: Units of the product in completed orders.
+      - name: revenue_gross
+        type: DOUBLE
+        description: Revenue of the product in EUR including VAT.
+      - name: revenue_net
+        type: DOUBLE
+        description: Revenue of the product in EUR excluding VAT.
+
+  shop_inventory_daily:
+    description: End-of-day stock per product in the shop's warehouse.
+    grain: One row per day and sku.
+    use_for: Stock levels and restocking.
+    typical_questions:
+      - Which products had less than 30 units in stock last Sunday?
+      - How did the stock of the Rain Shell Jacket develop?
+    important: A stock level, not a flow — never SUM it over days.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: sku
+        type: VARCHAR
+        description: Product.
+      - name: stock_units
+        type: INTEGER
+        description: Units in stock at the end of the day.
+
+  # ── Marketplaces ────────────────────────────────────────────────────────
+
+  marketplace_amazon_sales_daily:
+    description: Sales on the Amazon marketplace per day and product, as Amazon reports them.
+    grain: One row per day and sku listed on Amazon.
+    use_for: Amazon units, ordered product sales, sessions, page views and Buy Box share per product.
+    typical_questions:
+      - What were our Amazon sales in August?
+      - Which product sells best on Amazon?
+    important: ordered_product_sales is GROSS (incl. VAT) and counts orders when placed, before cancellations and returns. Marketplace sales are not web-shop sales.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: sku
+        type: VARCHAR
+        description: Product.
+      - name: units_ordered
+        type: INTEGER
+        description: Units ordered on Amazon.
+      - name: ordered_product_sales
+        type: DOUBLE
+        description: Value of ordered units in EUR, including VAT.
+      - name: sessions
+        type: INTEGER
+        description: Visits to the product's Amazon detail page.
+      - name: page_views
+        type: INTEGER
+        description: Detail-page views on Amazon.
+      - name: buy_box_share
+        type: DOUBLE
+        description: Share of page views where we held the Buy Box, between 0 and 1.
+        definition: A ratio per row — weight it by page_views when averaging over days or products.
+
+  marketplace_otto_sales_daily:
+    description: Sales on the Otto marketplace per day and product, as Otto reports them.
+    grain: One row per day and sku listed on Otto.
+    use_for: Otto units sold, net revenue and returns per product.
+    typical_questions:
+      - What was our Otto revenue in August?
+      - How many units were returned on Otto?
+    important: revenue_net is NET (excl. VAT) — unlike Amazon's gross figure. To compare or add the two marketplaces use marketplace_sales_daily, which has both in gross.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: sku
+        type: VARCHAR
+        description: Product.
+      - name: units_sold
+        type: INTEGER
+        description: Units sold on Otto.
+      - name: revenue_net
+        type: DOUBLE
+        description: Revenue in EUR excluding VAT.
+        definition: Net. Gross = revenue_net * 1.19.
+      - name: units_returned
+        type: INTEGER
+        description: Units returned on Otto, booked on the sale day.
+
+  marketplace_sales_daily:
+    description: Both marketplaces side by side per day, harmonised to gross revenue.
+    grain: One row per day and marketplace.
+    use_for: Total marketplace revenue, Amazon versus Otto, marketplace share.
+    typical_questions:
+      - How much did we sell on marketplaces in total in August?
+      - What share of marketplace revenue comes from Amazon?
+    important: revenue_gross is gross for both marketplaces (Otto converted from net). It does not include the own web shop.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: marketplace
+        type: VARCHAR
+        description: amazon or otto.
+      - name: units
+        type: INTEGER
+        description: Units ordered or sold.
+      - name: revenue_gross
+        type: DOUBLE
+        description: Revenue in EUR including VAT.
+
+  marketplace_amazon_fees_monthly:
+    description: Amazon fees charged per month and fee type.
+    grain: One row per month and fee type.
+    use_for: Marketplace costs — referral, fulfilment and storage fees.
+    typical_questions:
+      - How much did we pay Amazon in fees in August?
+    important: Amounts are negative (they are costs). These are marketplace fees, not advertising costs.
+    columns:
+      - name: month
+        type: DATE
+        description: First day of the month.
+      - name: fee_type
+        type: VARCHAR
+        description: referral_fee, fulfillment_fee or storage_fee.
+      - name: amount_eur
+        type: DOUBLE
+        description: Fee amount in EUR, negative.
+
+  # ── Advertising, per channel ────────────────────────────────────────────
+
+  ads_google_search_campaign_daily:
+    description: Google Ads search campaigns, daily performance per campaign.
+    grain: One row per day and campaign_id.
+    use_for: Google search ad spend, clicks, impressions, CPC, CTR, conversions and ROAS per campaign.
+    typical_questions:
+      - What did we spend on Google search ads in August?
+      - Which search campaign had the best ROAS?
+    important: cost_micros is in MICROS (1 EUR = 1,000,000). Campaign names via campaigns. Conversions use Google's data-driven attribution and can be fractional.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign, join to campaigns.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks.
+        definition: CTR = SUM(clicks) / SUM(impressions), CPC = (SUM(cost_micros) / 1e6) / SUM(clicks) — ratios of sums.
+      - name: cost_micros
+        type: BIGINT
+        description: Spend in micros of EUR.
+        definition: Divide by 1,000,000 for EUR. ROAS = SUM(conversion_value) / (SUM(cost_micros) / 1e6).
+      - name: conversions
+        type: DOUBLE
+        description: Conversions as reported by Google Ads (data-driven attribution, fractional).
+      - name: conversion_value
+        type: DOUBLE
+        description: Value of the conversions in EUR, gross, as reported by Google Ads.
+        definition: Platform-attributed, not shop revenue.
+
+  ads_google_shopping_product_daily:
+    description: Google Ads shopping campaigns, daily performance per campaign and product.
+    grain: One row per day, campaign_id and sku.
+    use_for: Google Shopping spend, clicks and conversions per product or campaign.
+    typical_questions:
+      - Which products got the most Shopping clicks?
+      - What was the Shopping ROAS per category?
+    important: cost_micros is in MICROS (1 EUR = 1,000,000). One campaign has many rows per day (one per product) — sum before computing campaign figures.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign, join to campaigns.
+      - name: sku
+        type: VARCHAR
+        description: Advertised product, join to products.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks.
+      - name: cost_micros
+        type: BIGINT
+        description: Spend in micros of EUR.
+        definition: Divide by 1,000,000 for EUR.
+      - name: conversions
+        type: DOUBLE
+        description: Conversions as reported by Google Ads (data-driven attribution, fractional).
+      - name: conversion_value
+        type: DOUBLE
+        description: Value of the conversions in EUR, gross, as reported by Google Ads.
+
+  ads_meta_campaign_daily:
+    description: Meta (Facebook and Instagram) ads, daily performance per campaign.
+    grain: One row per day and campaign_id.
+    use_for: Meta ad spend, reach, link clicks, purchases and ROAS per campaign.
+    typical_questions:
+      - What did we spend on Meta in July?
+      - What was the ROAS of the Meta retargeting campaign?
+    important: spend is in EUR. Purchases are attributed by Meta with a 7-day-click / 1-day-view window, so they include view-through purchases and overlap with other channels' conversions.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign, join to campaigns.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: reach
+        type: INTEGER
+        description: People reached that day.
+        definition: Unique per day only — never SUM reach over days to get the reach of a period.
+      - name: link_clicks
+        type: INTEGER
+        description: Clicks on the ad's link.
+      - name: spend
+        type: DOUBLE
+        description: Spend in EUR.
+      - name: purchases
+        type: INTEGER
+        description: Purchases attributed by Meta (7-day click, 1-day view).
+      - name: purchase_value
+        type: DOUBLE
+        description: Value of those purchases in EUR, gross.
+        definition: ROAS = SUM(purchase_value) / SUM(spend).
+
+  ads_microsoft_campaign_daily:
+    description: Microsoft Advertising (Bing) campaigns, daily performance per campaign.
+    grain: One row per day and campaign_id.
+    use_for: Bing ad spend, clicks, conversions and ROAS per campaign.
+    typical_questions:
+      - What did we spend on Bing in August?
+    important: spend is in EUR.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign, join to campaigns.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks.
+      - name: spend
+        type: DOUBLE
+        description: Spend in EUR.
+      - name: conversions
+        type: DOUBLE
+        description: Conversions as reported by Microsoft Advertising.
+      - name: revenue
+        type: DOUBLE
+        description: Conversion revenue in EUR, gross, as reported by Microsoft Advertising.
+
+  ads_amazon_sp_campaign_daily:
+    description: Amazon Sponsored Products campaigns, daily performance per campaign.
+    grain: One row per day and campaign_id.
+    use_for: Amazon ad spend, clicks, attributed orders and sales, ACoS and ROAS per campaign.
+    typical_questions:
+      - What was our ACoS on Amazon in August?
+      - Which Sponsored Products campaign sold the most?
+    important: cost is in EUR. Attributed sales and orders come in two windows, 7 and 14 days; the 14-day figures include the 7-day ones — use ONE window per question, 14 days unless the question names 7. These sales happen on Amazon, not in the web shop.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: campaign_id
+        type: INTEGER
+        description: Campaign, join to campaigns.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks.
+      - name: cost
+        type: DOUBLE
+        description: Spend in EUR.
+      - name: attributed_orders_7d
+        type: INTEGER
+        description: Orders within 7 days of an ad click.
+      - name: attributed_orders_14d
+        type: INTEGER
+        description: Orders within 14 days of an ad click (includes the 7-day ones).
+      - name: attributed_sales_7d
+        type: DOUBLE
+        description: Sales in EUR within 7 days of an ad click, gross.
+      - name: attributed_sales_14d
+        type: DOUBLE
+        description: Sales in EUR within 14 days of an ad click, gross (includes the 7-day ones).
+        definition: ACoS = SUM(cost) / SUM(attributed_sales_14d); ROAS is its inverse. Never add the 7d and 14d columns.
+
+  # ── Advertising, all channels ───────────────────────────────────────────
+
+  ads_all_channels_daily:
+    description: All five ad channels side by side per day, in EUR.
+    grain: One row per day and channel.
+    use_for: Total ad spend, spend per channel, clicks and impressions across channels, channel comparison.
+    typical_questions:
+      - What was our total ad spend in August?
+      - How much did we spend per channel last month?
+    important: cost_eur is converted to EUR for every channel. platform_conversions and platform_conversion_value are each platform's own attribution (Google data-driven, Meta 7d-click/1d-view, Amazon 14 days, Microsoft) — they overlap and do not add up to shop orders; compare channels on them only with that caveat. Campaign-level questions need the per-channel tables.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: channel
+        type: VARCHAR
+        description: google_search, google_shopping, meta, microsoft or amazon_sp.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks (link clicks for Meta).
+      - name: cost_eur
+        type: DOUBLE
+        description: Spend in EUR.
+      - name: platform_conversions
+        type: DOUBLE
+        description: Conversions as each platform reports them.
+      - name: platform_conversion_value
+        type: DOUBLE
+        description: Conversion value in EUR as each platform reports it, gross.
+        definition: Platform ROAS = SUM(platform_conversion_value) / SUM(cost_eur), per channel.
+
+  ads_all_channels_weekly:
+    description: All ad channels per calendar week — the same figures as ads_all_channels_daily, summed per week.
+    grain: One row per week (starting Monday) and channel.
+    use_for: Week-over-week ad spend per channel.
+    typical_questions:
+      - How did ad spend develop week by week?
+    important: Weeks run Monday to Sunday, keyed by week_start. For any other date range use ads_all_channels_daily.
+    columns:
+      - name: week_start
+        type: DATE
+        description: Monday of the week.
+      - name: channel
+        type: VARCHAR
+        description: Ad channel.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks.
+      - name: cost_eur
+        type: DOUBLE
+        description: Spend in EUR.
+      - name: platform_conversions
+        type: DOUBLE
+        description: Conversions as each platform reports them.
+      - name: platform_conversion_value
+        type: DOUBLE
+        description: Conversion value in EUR as each platform reports it, gross.
+
+  ads_all_channels_monthly:
+    description: All ad channels per calendar month — the same figures as ads_all_channels_daily, summed per month.
+    grain: One row per month and channel.
+    use_for: Monthly ad spend per channel, spend against budget.
+    typical_questions:
+      - What was the ad spend per month and channel?
+    important: September 2026 is a partial month (data ends 2026-09-27).
+    columns:
+      - name: month
+        type: DATE
+        description: First day of the month.
+      - name: channel
+        type: VARCHAR
+        description: Ad channel.
+      - name: impressions
+        type: INTEGER
+        description: Ad impressions.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks.
+      - name: cost_eur
+        type: DOUBLE
+        description: Spend in EUR.
+      - name: platform_conversions
+        type: DOUBLE
+        description: Conversions as each platform reports them.
+      - name: platform_conversion_value
+        type: DOUBLE
+        description: Conversion value in EUR as each platform reports it, gross.
+
+  ads_all_channels_daily_v1:
+    description: DEPRECATED — the first cross-channel spend table. Use ads_all_channels_daily instead.
+    grain: One row per day and channel.
+    use_for: Nothing new. Kept only so that old reports still run.
+    typical_questions:
+      - (none — superseded by ads_all_channels_daily)
+    important: DEPRECATED. Covers only google_search and meta (no Shopping, Microsoft or Amazon), and cost is in euro CENTS. Never use it to answer a question.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: channel
+        type: VARCHAR
+        description: google_search or meta.
+      - name: clicks
+        type: INTEGER
+        description: Ad clicks.
+      - name: cost
+        type: BIGINT
+        description: Spend in euro cents.
+
+  marketing_budget_monthly:
+    description: The planned advertising budget per month and channel.
+    grain: One row per month and channel.
+    use_for: Planned budget, budget versus actual spend (actual spend from ads_all_channels_monthly or _daily).
+    typical_questions:
+      - Did we stay within the Meta budget in August?
+    important: The September budget is for the full month; the data ends 2026-09-27.
+    columns:
+      - name: month
+        type: DATE
+        description: First day of the month.
+      - name: channel
+        type: VARCHAR
+        description: Ad channel, same values as ads_all_channels_daily.channel.
+      - name: planned_budget_eur
+        type: DOUBLE
+        description: Planned spend for the month in EUR.
+
+  # ── Web analytics ───────────────────────────────────────────────────────
+
+  web_sessions_daily:
+    description: Web-shop sessions per day and channel group, from web analytics.
+    grain: One row per day and channel_group.
+    use_for: Traffic, engaged sessions and new users per channel group.
+    typical_questions:
+      - How many sessions came from organic search in August?
+      - What was the daily average number of sessions last month?
+    important: One row per day AND channel group — a daily average is SUM(sessions) / number of days, not AVG(sessions).
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: channel_group
+        type: VARCHAR
+        description: paid_search, paid_shopping, paid_social, organic_search, direct, email or referral.
+      - name: sessions
+        type: INTEGER
+        description: Sessions.
+      - name: engaged_sessions
+        type: INTEGER
+        description: Sessions that lasted at least 10 seconds or viewed two pages.
+      - name: new_users
+        type: INTEGER
+        description: First-time visitors.
+
+  web_conversions_last_click_daily:
+    description: Web-shop purchases per day and channel group, attributed to the LAST click before the purchase.
+    grain: One row per day and channel_group.
+    use_for: Purchases and purchase revenue per channel under last-click attribution — the default view of which channel closed the sale.
+    typical_questions:
+      - Which channel brought the most purchases (last click)?
+      - What was the conversion rate per channel group?
+    important: Counts completed web-shop orders; all three attribution tables have the same total per day and differ only in how they split it across channel groups. Use this one unless the question names another model. Conversion rate per channel = purchases here / sessions in web_sessions_daily.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: channel_group
+        type: VARCHAR
+        description: Channel group, same values as web_sessions_daily.
+      - name: purchases
+        type: INTEGER
+        description: Purchases attributed to the channel group by last click.
+      - name: purchase_revenue_gross
+        type: DOUBLE
+        description: Revenue of those purchases in EUR including VAT, excluding shipping.
+
+  web_conversions_first_click_daily:
+    description: Web-shop purchases per day and channel group, attributed to the FIRST click of the customer journey.
+    grain: One row per day and channel_group.
+    use_for: Which channel starts the journeys that end in a purchase (first-click attribution).
+    typical_questions:
+      - Which channel starts most customer journeys?
+    important: Same total as the last-click table, split by first touch. Only use it when a question asks about first click, first touch or journey starts.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: channel_group
+        type: VARCHAR
+        description: Channel group.
+      - name: purchases
+        type: INTEGER
+        description: Purchases attributed to the channel group by first click.
+      - name: purchase_revenue_gross
+        type: DOUBLE
+        description: Revenue of those purchases in EUR including VAT, excluding shipping.
+
+  web_conversions_data_driven_daily:
+    description: Web-shop purchases per day and channel group, attributed data-driven across the touchpoints of a journey.
+    grain: One row per day and channel_group.
+    use_for: Channel contribution under data-driven (multi-touch) attribution.
+    typical_questions:
+      - How do purchases split across channels with data-driven attribution?
+    important: Same total as the last-click table, shared fractionally between touchpoints — purchases is fractional. Only use it when a question asks about data-driven or multi-touch attribution.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: channel_group
+        type: VARCHAR
+        description: Channel group.
+      - name: purchases
+        type: DOUBLE
+        description: Fractional purchases credited to the channel group.
+      - name: purchase_revenue_gross
+        type: DOUBLE
+        description: Revenue credited to the channel group in EUR including VAT, excluding shipping.
+
+  web_funnel_daily:
+    description: The web-shop purchase funnel per day and device.
+    grain: One row per day and device.
+    use_for: Funnel steps from session to purchase, drop-off per step, mobile versus desktop.
+    typical_questions:
+      - What share of sessions added something to the cart?
+      - How does the mobile conversion rate compare to desktop?
+    important: Each step counts sessions that reached it. Step rates are ratios of sums over the period (e.g. SUM(add_to_carts) / SUM(sessions)).
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: device
+        type: VARCHAR
+        description: mobile, desktop or tablet.
+      - name: sessions
+        type: INTEGER
+        description: Sessions.
+      - name: product_views
+        type: INTEGER
+        description: Sessions with at least one product page view.
+      - name: add_to_carts
+        type: INTEGER
+        description: Sessions with at least one add-to-cart.
+      - name: checkouts
+        type: INTEGER
+        description: Sessions that started the checkout.
+      - name: purchases
+        type: INTEGER
+        description: Sessions with a completed purchase.
+
+  web_landing_pages_daily:
+    description: Sessions per day and landing page.
+    grain: One row per day and landing_page.
+    use_for: Which entry pages bring traffic and purchases.
+    typical_questions:
+      - Which landing page had the most sessions?
+    important: Covers only the main landing pages, so its sums are below the site totals in web_sessions_daily.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: landing_page
+        type: VARCHAR
+        description: Path of the first page of the session.
+      - name: sessions
+        type: INTEGER
+        description: Sessions that started on the page.
+      - name: engaged_sessions
+        type: INTEGER
+        description: Engaged sessions that started on the page.
+      - name: purchases
+        type: INTEGER
+        description: Sessions starting there that ended in a purchase.
+
+  web_site_search_weekly:
+    description: Searches in the shop's own site search per week and search term.
+    grain: One row per week (starting Monday) and search_term.
+    use_for: What visitors search for on the site.
+    typical_questions:
+      - What were the most searched terms on our site?
+    columns:
+      - name: week_start
+        type: DATE
+        description: Monday of the week.
+      - name: search_term
+        type: VARCHAR
+        description: Search term entered.
+      - name: searches
+        type: INTEGER
+        description: Number of searches.
+      - name: search_exits
+        type: INTEGER
+        description: Searches after which the visitor left the site.
+
+  email_sends_daily:
+    description: Email sends per day and email campaign, from the email tool.
+    grain: One row per day and email_campaign with sends.
+    use_for: Email volume, opens and clicks.
+    typical_questions:
+      - How many newsletters did we send in August?
+      - What was the email open rate?
+    important: Email purchases are in the web conversion tables (channel_group = 'email'), not here.
+    columns:
+      - name: date
+        type: DATE
+        description: Day.
+      - name: email_campaign
+        type: VARCHAR
+        description: newsletter_weekly, abandoned_cart, summer_sale or new_arrivals.
+      - name: sends
+        type: INTEGER
+        description: Emails delivered.
+      - name: opens
+        type: INTEGER
+        description: Emails opened.
+        definition: Open rate = SUM(opens) / SUM(sends).
+      - name: clicks
+        type: INTEGER
+        description: Emails with a click.
+
+join_relationships:
+  - {view_a: shop_orders, view_b: shop_order_items, keys: [order_id]}
+  - {view_a: shop_orders, view_b: shop_returns, keys: [order_id]}
+  - {view_a: shop_orders, view_b: customers, keys: [customer_id]}
+  - {view_a: shop_order_items, view_b: products, keys: [sku]}
+  - {view_a: shop_returns, view_b: products, keys: [sku]}
+  - {view_a: shop_product_sales_daily, view_b: products, keys: [sku]}
+  - {view_a: shop_inventory_daily, view_b: products, keys: [sku]}
+  - {view_a: marketplace_amazon_sales_daily, view_b: products, keys: [sku]}
+  - {view_a: marketplace_otto_sales_daily, view_b: products, keys: [sku]}
+  - {view_a: ads_google_shopping_product_daily, view_b: products, keys: [sku]}
+  - {view_a: ads_google_search_campaign_daily, view_b: campaigns, keys: [campaign_id]}
+  - {view_a: ads_google_shopping_product_daily, view_b: campaigns, keys: [campaign_id]}
+  - {view_a: ads_meta_campaign_daily, view_b: campaigns, keys: [campaign_id]}
+  - {view_a: ads_microsoft_campaign_daily, view_b: campaigns, keys: [campaign_id]}
+  - {view_a: ads_amazon_sp_campaign_daily, view_b: campaigns, keys: [campaign_id]}
+  - {view_a: ads_all_channels_monthly, view_b: marketing_budget_monthly, keys: [month, channel]}
+  - {view_a: web_sessions_daily, view_b: web_conversions_last_click_daily, keys: [date, channel_group]}
+
+join_notes:
+  - Per-day tables join on date; aggregate both sides to the same grain before joining, or a one-to-many join multiplies the sums.
+
+ai_warnings:
+  - Money units differ by table — Google tables are in micros (cost_micros), the deprecated ads_all_channels_daily_v1 in cents, everything else in EUR.
+  - Gross includes 19 % VAT, net excludes it. Otto reports net, Amazon and the web shop report gross; "revenue" without a qualifier means net shop revenue.
+  - Platform-attributed conversions (ad tables) are not shop orders and overlap between channels; shop orders per channel come from the web conversion tables.
+  - Tables marked DEPRECATED must not be used to answer questions.
+  - Weekly tables run Monday to Sunday; monthly tables are keyed by the first day of the month; September 2026 is partial.

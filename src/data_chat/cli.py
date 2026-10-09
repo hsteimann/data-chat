@@ -1,6 +1,7 @@
 """Command line: build the demo data, show a prompt, ask a question, run the evaluation.
 
     data-chat demo-data                       # data/demo.duckdb (generated)
+    data-chat --dataset demo-large demo-data  # data/demo-large.duckdb, 35 tables (generated)
     data-chat prompt --stage catalog          # the SQL system prompt — no API key needed
     data-chat ask "What was our ad spend in August 2026?" --stage catalog
     data-chat ask "Ad spend per channel in August 2026?" --chart answer.html
@@ -15,9 +16,13 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from data_chat.context import REPO_ROOT, STAGES, build_context
+from data_chat.datasets import DATASETS, get_dataset
 
-DEFAULT_DB = REPO_ROOT / "data" / "demo.duckdb"
-DEFAULT_QUESTIONS = REPO_ROOT / "eval" / "questions.yaml"
+
+
+def _context(args, stage: str, backend) -> str:
+    ds = get_dataset(args.dataset)
+    return build_context(stage, backend, freetext_path=ds.freetext, catalog_path=ds.catalog)
 
 
 def _backend(args):
@@ -28,12 +33,11 @@ def _backend(args):
         if not dataset:
             sys.exit("--bigquery expects PROJECT.DATASET")
         return BigQueryBackend(project, dataset)
-    return DuckDbBackend(args.db)
+    return DuckDbBackend(args.db or get_dataset(args.dataset).db)
 
 
 def _period(args) -> tuple[date, date]:
-    from data_chat.demo_data import END, START
-
+    START, END = get_dataset(args.dataset).period
     return (
         date.fromisoformat(args.start) if args.start else START,
         date.fromisoformat(args.end) if args.end else END,
@@ -41,17 +45,15 @@ def _period(args) -> tuple[date, date]:
 
 
 def cmd_demo_data(args) -> None:
-    from data_chat.demo_data import write_duckdb
-
-    path = write_duckdb(args.db)
-    print(f"Wrote GENERATED demo data to {path}")
+    path = get_dataset(args.dataset).write_duckdb(args.db)
+    print(f"Wrote GENERATED demo data ({args.dataset}) to {path}")
 
 
 def cmd_prompt(args) -> None:
     from data_chat.prompts import sql_system_prompt
 
     backend = _backend(args)
-    print(sql_system_prompt(backend.dialect, build_context(args.stage, backend)))
+    print(sql_system_prompt(backend.dialect, _context(args, args.stage, backend)))
 
 
 def cmd_ask(args) -> None:
@@ -63,7 +65,7 @@ def cmd_ask(args) -> None:
     start, end = _period(args)
     result = ask(
         args.question, llm=llm, model=model, backend=backend,
-        context=build_context(args.stage, backend), start_date=start, end_date=end,
+        context=_context(args, args.stage, backend), start_date=start, end_date=end,
     )
     print(f"-- stage: {args.stage} · model: {model}" + (" · retried once" if result.retried else ""))
     if result.sql:
@@ -92,18 +94,20 @@ def cmd_eval(args) -> None:
     backend = _backend(args)
     llm, model = llm_from_env()
     start, end = _period(args)
-    questions = load_questions(args.questions)
+    questions_path = args.questions or get_dataset(args.dataset).questions
+    questions = load_questions(questions_path)
     stages = tuple(args.stage) if args.stage else STAGES
     outcomes = run_eval(
         questions, llm=llm, model=model, backend=backend, stages=stages,
         start_date=start, end_date=end, charts=args.charts,
+        catalog_path=get_dataset(args.dataset).catalog, freetext_path=get_dataset(args.dataset).freetext,
     )
     print(summary_table(outcomes, questions))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = write_outcomes(
         outcomes,
         REPO_ROOT / "eval" / "results" / f"{stamp}.json",
-        {"model": model, "stages": list(stages), "questions": str(args.questions),
+        {"model": model, "dataset": args.dataset, "stages": list(stages), "questions": str(questions_path),
          "charts": args.charts, "run_at": stamp},
     )
     print(f"\nPer-question SQL and errors: {path}")
@@ -112,7 +116,9 @@ def cmd_eval(args) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="data-chat", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB, help="DuckDB file (default: data/demo.duckdb)")
+    parser.add_argument("--dataset", choices=list(DATASETS), default="demo",
+                        help="demo (5 tables, the original setup) or demo-large (35 tables)")
+    parser.add_argument("--db", type=Path, help="DuckDB file (default: the dataset's, e.g. data/demo.duckdb)")
     parser.add_argument("--bigquery", metavar="PROJECT.DATASET", help="query BigQuery instead of DuckDB")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -133,7 +139,7 @@ def main(argv: list[str] | None = None) -> None:
         else:
             p.add_argument("--stage", choices=STAGES, action="append",
                            help="repeatable; default: all three")
-            p.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
+            p.add_argument("--questions", type=Path, help="default: the dataset's question set")
             p.add_argument("--charts", action="store_true",
                            help="also ask for the answer and check its chart spec (one more call per question)")
         p.add_argument("--start", help="date range start, YYYY-MM-DD (default: demo data start)")

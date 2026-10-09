@@ -138,10 +138,13 @@ def run_eval(
     start_date: date,
     end_date: date,
     charts: bool = False,
+    catalog_path: str | Path | None = None,
+    freetext_path: str | Path | None = None,
 ) -> list[Outcome]:
     outcomes = []
+    paths = {k: v for k, v in (("catalog_path", catalog_path), ("freetext_path", freetext_path)) if v}
     for stage in stages:
-        context = build_context(stage, backend)
+        context = build_context(stage, backend, **paths)
         for q in questions:
             expected = backend.execute(q.expected_sql)
             result = ask(
