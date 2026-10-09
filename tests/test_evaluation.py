@@ -62,3 +62,15 @@ def test_demo_data_is_deterministic():
     a, b = build_tables(), build_tables()
     for name in a:
         pd.testing.assert_frame_equal(a[name], b[name])
+
+
+def test_the_rounded_score_accepts_a_rate_rounded_to_two_decimals_and_the_strict_one_does_not():
+    import pandas as pd
+
+    from data_chat.evaluation import results_match
+
+    expected, actual = pd.DataFrame({"acos": [0.1153]}), pd.DataFrame({"acos_14d": [0.12]})
+    assert not results_match(expected, actual)
+    assert results_match(expected, actual, rounded=True)
+    assert results_match(expected, pd.DataFrame({"pct": [11.53]}), rounded=True)
+    assert not results_match(expected, pd.DataFrame({"acos": [0.13]}), rounded=True)

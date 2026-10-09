@@ -21,6 +21,12 @@ Scoring rules (``results_match``):
 
 Column order, row order and column names are ignored.
 
+``correct_rounded`` is a second, looser score recorded next to ``correct``
+and never instead of it: it also accepts any value rounded to two decimals,
+ratios below 1 included. The SQL prompt asks for two decimals (rule 7), so a
+right query for a rate of 0.1153 may return 0.12, which the strict rule
+counts wrong. Both are reported; neither replaces the other.
+
 For the ``catalog_selected`` stage each outcome also records which views the
 selection step picked, and — when the question names the views its answer
 needs (``views:`` in the question file) — the selection's recall (were all of
@@ -92,6 +98,8 @@ class Outcome:
     #: Every model call: phase, tokens, seconds.
     steps: list = None
     seconds: float = 0.0
+    #: Looser score, next to ``correct``: two-decimal rounding of any value accepted.
+    correct_rounded: bool | None = None
 
 
 def chart_as_asked(status: str, rows: int) -> bool:
@@ -142,25 +150,29 @@ def _round2(v: float) -> float:
     return round(v, 2) if abs(v) >= 1 else v
 
 
-def _column_matches(expected: pd.Series, actual: pd.Series) -> bool:
+def _column_matches(expected: pd.Series, actual: pd.Series, rounded: bool = False) -> bool:
     exp_num = _numeric(expected)
     if exp_num is not None:
         act_num = _numeric(actual)
         if act_num is None:
             return False
         candidates = [exp_num, sorted(_round2(v) for v in exp_num)]
+        if rounded:
+            candidates.append(sorted(round(v, 2) for v in exp_num))
+            if all(abs(v) <= 1 for v in exp_num):
+                candidates.append(sorted(round(v * 100, 2) for v in exp_num))
         if all(abs(v) <= 1 for v in exp_num):  # a ratio: percent is the same answer
             candidates += [[v * 100 for v in exp_num], sorted(_round2(v * 100) for v in exp_num)]
         return any(_close(c, act_num) for c in candidates)
     return set(expected.astype(str)) == set(actual.astype(str))
 
 
-def results_match(expected: pd.DataFrame, actual: pd.DataFrame | None) -> bool:
+def results_match(expected: pd.DataFrame, actual: pd.DataFrame | None, *, rounded: bool = False) -> bool:
     if actual is None or len(expected) != len(actual):
         return False
     unused = list(actual.columns)
     for col in expected.columns:
-        hit = next((a for a in unused if _column_matches(expected[col], actual[a])), None)
+        hit = next((a for a in unused if _column_matches(expected[col], actual[a], rounded)), None)
         if hit is None:
             return False
         unused.remove(hit)
@@ -215,6 +227,7 @@ def run_eval(
                 precision=precision,
                 steps=[asdict(s) for s in result.steps],
                 seconds=round(result.seconds, 3),
+                correct_rounded=result.failure is None and results_match(expected, result.data, rounded=True),
             ))
     return outcomes
 
@@ -246,6 +259,12 @@ def summary_table(outcomes: list[Outcome], questions: list[Question]) -> str:
         got = [o for o in outcomes if o.stage == s]
         totals.append(f"**{sum(o.correct for o in got)}/{len(got)}**")
     lines.append("| **correct** | " + " | ".join(totals) + " |")
+    if any(o.correct_rounded is not None for o in outcomes):
+        loose = []
+        for s in stages:
+            got = [o for o in outcomes if o.stage == s and o.correct_rounded is not None]
+            loose.append(f"{sum(bool(o.correct_rounded) for o in got)}/{len(got)}")
+        lines.append("| correct if two-decimal rounding counts | " + " | ".join(loose) + " |")
     if any(o.steps for o in outcomes):
         def row(label, fn, fmt):
             cells = []
