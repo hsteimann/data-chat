@@ -120,7 +120,9 @@ def select_views(
             model=model,
             system=selection_prompt(catalog),
             messages=[{"role": "user", "content": user}],
-            max_tokens=1024,
+            # The reply is a few dozen tokens; the room is for models that
+            # think by default, whose thinking counts against this cap.
+            max_tokens=4096,
             output_format=output_format(names),
         )
         usage = getattr(reply, "usage", NO_USAGE)

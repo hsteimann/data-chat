@@ -273,7 +273,9 @@ def summary_table(outcomes: list[Outcome], questions: list[Question]) -> str:
                 cells.append("—" if v is None else fmt(v))
             lines.append(f"| {label} | " + " | ".join(cells) + " |")
 
-        row("prompt tokens / question, selection", lambda o: _prompt_tokens(o, ("select",)), lambda v: f"{v:,.0f}")
+        row("prompt tokens / question, selection",
+            lambda o: _prompt_tokens(o, ("select",)) if any(s["phase"] == "select" for s in o.steps or []) else None,
+            lambda v: f"{v:,.0f}")
         row("prompt tokens / question, SQL", lambda o: _prompt_tokens(o, ("sql",)), lambda v: f"{v:,.0f}")
         row("seconds / question", lambda o: o.seconds or None, lambda v: f"{v:.1f}")
     if any(o.recall is not None for o in outcomes):
